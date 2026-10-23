@@ -1,8 +1,12 @@
+import asyncio
 import csv
+import hashlib
 import io
+import json
 import os
+import time
 from contextlib import asynccontextmanager
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import uvicorn
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request
@@ -21,25 +25,40 @@ from database import (
     get_battles_list,
     get_battle_stats,
     get_battle_details,
+    get_chat_messages,
     get_dashboard_overview,
     get_db,
+    get_donor_crm,
+    get_donor_details,
+    get_donor_radar_data,
+    get_network_loyalty_and_overlap,
+    get_recent_whale_gifts,
     get_settings,
+    get_site_analytics_overview,
     get_streamer_by_id_or_username,
     get_streamer_detail,
     get_telegram_access_mode,
     init_db,
     inspect_sqlite_database,
     import_from_sqlite_database,
+    check_telegram_user_access,
     list_telegram_users,
+    record_bot_session,
     record_gift_event,
+    record_page_view,
+    save_donor_crm,
     seed_demo_data,
+    toggle_donor_vip,
     update_settings,
     upsert_streamer,
     upsert_telegram_user_permission,
 )
 from schemas import (
     DailyBotReportResponse,
+    DonorCRMUpdateRequest,
     GiftCreateRequest,
+    MiniAppAuthRequest,
+    MiniAppVerifyCodeRequest,
     SettingsUpdateRequest,
     SqliteImportRequest,
     StreamerCreateRequest,
@@ -47,6 +66,7 @@ from schemas import (
     TelegramUserPermissionRequest,
     TrackActionRequest,
 )
+from system_service import get_system_health
 from telegram_service import (
     AdminAuthManager,
     admin_auth_manager,
@@ -126,17 +146,79 @@ if os.path.isdir(os.path.join(BASE_DIR, "pictures")):
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 
+def _extract_client_ip(request: Request) -> str:
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    x_real = request.headers.get("x-real-ip")
+    if x_real:
+        return x_real.strip()
+    if request.client and request.client.host:
+        return request.client.host
+    return "127.0.0.1"
+
+
+def _detect_device_type(user_agent: str) -> str:
+    ua = (user_agent or "").lower()
+    if any(b in ua for b in ["bot", "spider", "crawler", "crawl", "slurp", "googlebot", "bingbot", "yandex"]):
+        return "bot"
+    if "ipad" in ua or "tablet" in ua:
+        return "tablet"
+    if any(m in ua for m in ["mobile", "android", "iphone", "ipod", "windows phone"]):
+        return "mobile"
+    return "desktop"
+
+
+@app.middleware("http")
+async def track_page_views_middleware(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    duration_ms = (time.time() - start_time) * 1000.0
+
+    path = request.url.path
+    if request.method == "GET" and not path.startswith((
+        "/static", "/pictures", "/api", "/docs", "/openapi", "/redoc", "/favicon.ico"
+    )):
+        try:
+            client_ip = _extract_client_ip(request)
+            salt = config.session_secret or "toktracker_salt_2026"
+            visitor_hash = hashlib.sha256(f"{client_ip}:{salt}".encode("utf-8")).hexdigest()[:20]
+            ua = request.headers.get("user-agent", "")
+            dev_type = _detect_device_type(ua)
+            ref = request.headers.get("referer", "")
+
+            record_page_view(
+                path=path,
+                visitor_hash=visitor_hash,
+                user_agent=ua,
+                device_type=dev_type,
+                referrer=ref,
+                status_code=response.status_code,
+                response_time_ms=duration_ms,
+            )
+        except Exception:
+            pass
+
+    return response
+
+
 def verify_admin_or_api_key(
     toktracker_admin_session: Optional[str] = Cookie(default=None),
+    x_admin_session: Optional[str] = Header(default=None, alias="X-Admin-Session"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
     x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
     api_key: Optional[str] = Query(default=None, description="Optionaler API-Key per Query-Parameter"),
 ) -> Dict[str, Any]:
     """
     Schützt alle Admin- und Verwaltungs-Endpunkte:
-    1. Prüft zuerst auf ein gültiges, signiertes Admin-Session-Cookie (Telegram-Login).
+    1. Prüft zuerst auf ein gültiges, signiertes Admin-Session-Cookie oder Header (Telegram-Login).
     2. Prüft alternativ auf einen konfigurierten X-API-Key (für externe Skripte/Automationen).
     """
-    session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
+    token = toktracker_admin_session or x_admin_session
+    if not token and authorization and authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+
+    session_payload = admin_auth_manager.verify_session_token(token)
     if session_payload:
         return session_payload
 
@@ -148,6 +230,42 @@ def verify_admin_or_api_key(
     raise HTTPException(
         status_code=401,
         detail="Nicht autorisiert. Bitte unter /login per Telegram authentifizieren oder gültigen X-API-Key übergeben.",
+    )
+
+
+def verify_radar_access(
+    toktracker_admin_session: Optional[str] = Cookie(default=None),
+    x_admin_session: Optional[str] = Header(default=None, alias="X-Admin-Session"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+    x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
+    api_key: Optional[str] = Query(default=None, description="Optionaler API-Key per Query-Parameter"),
+) -> Dict[str, Any]:
+    """
+    Erlaubt Zugriff auf das Spender-Radar für:
+    1. Authentifizierte Admins & freigeschaltete Telegram-Mini-App-Nutzer
+    2. API-Key-Inhaber
+    3. Öffentlichen Zugriff, falls telegram_access_mode == 'public'
+    """
+    token = toktracker_admin_session or x_admin_session
+    if not token and authorization and authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+
+    if token:
+        session_payload = admin_auth_manager.verify_session_token(token)
+        if session_payload:
+            return session_payload
+
+    configured_key = (config.api_key or get_settings().get("api_key") or "").strip()
+    provided = (x_api_key or api_key or "").strip()
+    if configured_key and provided and provided == configured_key:
+        return {"sub": "api_key"}
+
+    if get_telegram_access_mode() == "public":
+        return {"role": "public", "is_allowed": True}
+
+    raise HTTPException(
+        status_code=401,
+        detail="Nicht autorisiert für Spender-Radar. Bitte im Telegram-Bot freischalten lassen.",
     )
 
 
@@ -188,8 +306,6 @@ async def public_panel(request: Request):
     """
     Startseite (/): Öffentliches User-Panel für Zuschauer (Read-Only).
     """
-    init_db()
-    monitor_manager.autostart_from_db()
     tg_diag = telegram_bot_service.get_diagnostics()
     return templates.TemplateResponse(
         request=request,
@@ -209,8 +325,6 @@ async def miniapp_page(request: Request):
     Mobile-First Telegram Mini-App & WebApp (/miniapp):
     Kompakte Übersicht über Live-Matches, Einnahmen, Streamer und Geschenke.
     """
-    init_db()
-    monitor_manager.autostart_from_db()
     tg_diag = telegram_bot_service.get_diagnostics()
     return templates.TemplateResponse(
         request=request,
@@ -279,6 +393,59 @@ async def admin_console(
     )
 
 
+@app.get("/site-analytics", response_class=HTMLResponse, include_in_schema=False)
+async def site_analytics_page(
+    request: Request,
+    toktracker_admin_session: Optional[str] = Cookie(default=None),
+):
+    """
+    Geschützte Analyse-Seite (/site-analytics). Leitet ohne gültige Telegram-Session auf /login weiter.
+    """
+    session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
+    if not session_payload:
+        return RedirectResponse(url="/login", status_code=302)
+
+    init_db()
+    return templates.TemplateResponse(
+        request=request,
+        name="site_analytics.html",
+        context={
+            "tiktoklive_available": TIKTOKLIVE_AVAILABLE,
+            "gift_catalog": TIKTOK_GIFT_CATALOG,
+            "env_summary": config.public_summary(),
+            "telegram_diag": telegram_bot_service.get_diagnostics(),
+            "admin_sub": session_payload.get("sub", "TELEGRAM"),
+        },
+    )
+
+
+@app.get("/donor-radar", response_class=HTMLResponse, include_in_schema=False)
+async def donor_radar_page(
+    request: Request,
+    toktracker_admin_session: Optional[str] = Cookie(default=None),
+):
+    """
+    Geschützte Spender-Radar & Chatlog-Seite (/donor-radar). Leitet ohne gültige Telegram-Session auf /login weiter.
+    """
+    session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
+    if not session_payload:
+        return RedirectResponse(url="/login", status_code=302)
+
+    init_db()
+    return templates.TemplateResponse(
+        request=request,
+        name="donor_radar.html",
+        context={
+            "tiktoklive_available": TIKTOKLIVE_AVAILABLE,
+            "gift_catalog": TIKTOK_GIFT_CATALOG,
+            "env_summary": config.public_summary(),
+            "telegram_diag": telegram_bot_service.get_diagnostics(),
+            "admin_sub": session_payload.get("sub", "TELEGRAM"),
+        },
+    )
+
+
+
 # =====================================================================
 # 1b. TELEGRAM ADMIN-AUTH ENDPOINTS (/api/auth/telegram/*)
 # =====================================================================
@@ -298,6 +465,22 @@ async def api_auth_telegram_request(request: Request, payload: TelegramLoginRequ
         identifier_hint=payload.identifier,
         client_info=client_info,
     )
+    if res.get("ok"):
+        try:
+            client_ip = _extract_client_ip(request)
+            salt = config.session_secret or "toktracker_salt_2026"
+            ip_hash = hashlib.sha256(f"{client_ip}:{salt}".encode("utf-8")).hexdigest()[:20]
+            record_bot_session(
+                session_type="telegram_login_challenge",
+                telegram_id=None,
+                username=payload.identifier or "",
+                first_name="",
+                client_ip_hash=ip_hash,
+                status="pending",
+                details_json=json.dumps({"challenge_id": res.get("challenge_id")}),
+            )
+        except Exception:
+            pass
     return res
 
 
@@ -309,6 +492,14 @@ async def api_auth_telegram_request(request: Request, payload: TelegramLoginRequ
 async def api_auth_telegram_poll(challenge_id: str = Query(..., min_length=8)):
     poll_res = admin_auth_manager.poll_challenge(challenge_id)
     if poll_res.get("status") == "approved":
+        try:
+            record_bot_session(
+                session_type="telegram_login_challenge",
+                status="approved",
+                details_json=json.dumps({"challenge_id": challenge_id, "approved_by": poll_res.get("admin_label")}),
+            )
+        except Exception:
+            pass
         resp = JSONResponse(
             content={
                 "ok": True,
@@ -358,9 +549,7 @@ async def api_auth_telegram_verify(payload: TelegramLoginVerifyPayload):
     summary="Öffentliche Read-Only Übersicht für das User-Panel (ohne interne Logs/Whitelist)",
 )
 async def api_public_overview(period: str = Query("24h", description="all | today | 24h | 7d | 30d")):
-    init_db()
-    monitor_manager.autostart_from_db()
-    raw = get_dashboard_overview(period=period)
+    raw = await asyncio.to_thread(get_dashboard_overview, period=period)
 
     public_streamers = []
     for s in raw.get("streamers", []):
@@ -442,12 +631,169 @@ async def api_public_streamer_detail(identifier: str, period: str = Query("24h")
 # TELEGRAM MINI-APP API (MOBILE-FIRST)
 # =====================================================================
 
+def consolidate_live_battles(
+    raw_workers: List[Dict[str, Any]],
+    streamer_map: Dict[Any, Any],
+    filter_streamer_id: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Konsolidiert aktive TikTok-Live-Battles aus den Workern.
+    Erkennt interne Duelle (beide Duellanten getrackt) und fasst sie zu einer
+    einheitlichen "Internes Derby"-Karte zusammen, anstatt zwei separate Karten anzuzeigen.
+    """
+    active_items = []
+    for w in raw_workers:
+        ab = w.get("active_battle")
+        if not ab:
+            continue
+        uname = str(w.get("username") or "")
+        s_id = w.get("streamer_id")
+        s_info = streamer_map.get(s_id) or streamer_map.get(uname.lower()) or {}
+        active_items.append({
+            "streamer_id": s_id,
+            "username": uname,
+            "display_name": s_info.get("display_name") or uname,
+            "avatar_url": s_info.get("avatar_url") or "",
+            "battle": dict(ab),
+        })
+
+    consolidated = []
+    merged_indices = set()
+
+    for i, item1 in enumerate(active_items):
+        if i in merged_indices:
+            continue
+
+        b1 = item1["battle"]
+        b1_id = str(b1.get("battle_id") or "").strip()
+        uname1 = item1["username"].lower()
+        opp1 = str(b1.get("opponent_username") or "").lower()
+
+        # Prüfen, ob ein anderer Worker dasselbe Battle hat
+        partner_item = None
+        for j, item2 in enumerate(active_items):
+            if i == j or j in merged_indices:
+                continue
+            b2 = item2["battle"]
+            b2_id = str(b2.get("battle_id") or "").strip()
+            uname2 = item2["username"].lower()
+            opp2 = str(b2.get("opponent_username") or "").lower()
+
+            # Gleiche battle_id oder wechselseitige Gegner
+            if (b1_id and b1_id == b2_id) or (uname1 and opp1 and uname1 == opp2 and uname2 == opp1):
+                partner_item = item2
+                merged_indices.add(j)
+                break
+
+        if partner_item:
+            merged_indices.add(i)
+            # Internes Duell zusammenführen
+            s1_coins = b1.get("coins_earned", 0) or 0
+            s2_coins = partner_item["battle"].get("coins_earned", 0) or 0
+            s1_eur = float(b1.get("eur_net", 0.0) or 0.0)
+            s2_eur = float(partner_item["battle"].get("eur_net", 0.0) or 0.0)
+            tot_coins = s1_coins + s2_coins
+            tot_eur = round(s1_eur + s2_eur, 2)
+
+            score1 = b1.get("streamer_score", 0) or 0
+            score2 = partner_item["battle"].get("streamer_score", 0) or 0
+
+            # Reihenfolge bestimmen: Wenn Filter gesetzt, gefilterter Streamer nach links; sonst Führender nach links
+            if filter_streamer_id and partner_item["streamer_id"] == filter_streamer_id:
+                left_item = partner_item
+                right_item = item1
+                left_score = score2
+                right_score = score1
+                left_coins = s2_coins
+                right_coins = s1_coins
+                left_eur = s2_eur
+                right_eur = s1_eur
+            elif not filter_streamer_id and score2 > score1:
+                left_item = partner_item
+                right_item = item1
+                left_score = score2
+                right_score = score1
+                left_coins = s2_coins
+                right_coins = s1_coins
+                left_eur = s2_eur
+                right_eur = s1_eur
+            else:
+                left_item = item1
+                right_item = partner_item
+                left_score = score1
+                right_score = score2
+                left_coins = s1_coins
+                right_coins = s2_coins
+                left_eur = s1_eur
+                right_eur = s2_eur
+
+            streamer_a = {
+                "id": left_item["streamer_id"],
+                "username": left_item["username"],
+                "display_name": left_item["display_name"],
+                "avatar_url": left_item["avatar_url"],
+                "score": left_score,
+                "coins_earned": left_coins,
+                "eur_net": left_eur,
+            }
+            streamer_b = {
+                "id": right_item["streamer_id"],
+                "username": right_item["username"],
+                "display_name": right_item["display_name"],
+                "avatar_url": right_item["avatar_url"],
+                "score": right_score,
+                "coins_earned": right_coins,
+                "eur_net": right_eur,
+            }
+
+            merged_battle = dict(left_item["battle"])
+            merged_battle["is_internal"] = True
+            merged_battle["streamer_a"] = streamer_a
+            merged_battle["streamer_b"] = streamer_b
+            merged_battle["total_coins"] = tot_coins
+            merged_battle["total_eur_net"] = tot_eur
+            merged_battle["streamer_score"] = left_score
+            merged_battle["opponent_score"] = right_score
+            merged_battle["opponent_username"] = right_item["username"]
+            merged_battle["opponent_display_name"] = right_item["display_name"]
+            merged_battle["opponent_avatar_url"] = right_item["avatar_url"]
+            merged_battle["coins_earned"] = tot_coins
+            merged_battle["eur_net"] = tot_eur
+
+            if filter_streamer_id:
+                if left_item["streamer_id"] == filter_streamer_id or right_item["streamer_id"] == filter_streamer_id:
+                    consolidated.append({
+                        "streamer_id": left_item["streamer_id"],
+                        "username": left_item["username"],
+                        "display_name": left_item["display_name"],
+                        "avatar_url": left_item["avatar_url"],
+                        "battle": merged_battle,
+                        "is_internal": True,
+                    })
+            else:
+                consolidated.append({
+                    "streamer_id": left_item["streamer_id"],
+                    "username": left_item["username"],
+                    "display_name": left_item["display_name"],
+                    "avatar_url": left_item["avatar_url"],
+                    "battle": merged_battle,
+                    "is_internal": True,
+                })
+        else:
+            # Normales Duell gegen externen Gegner
+            if filter_streamer_id and item1["streamer_id"] != filter_streamer_id:
+                continue
+            item1["battle"]["is_internal"] = False
+            consolidated.append(item1)
+
+    return consolidated
+
 @app.get(
     "/api/miniapp/data",
     tags=["Telegram Mini-App"],
     summary="Kompakter Daten-Feed für die Telegram Mini-App (Live-Matches, Einnahmen, Streamer)",
 )
-async def api_miniapp_data(period: str = Query("today", description="today | 24h | 7d | 30d | all")):
+async def api_miniapp_data(period: str = Query("24h", description="today | 24h | 7d | 30d | all")):
     init_db()
     monitor_manager.autostart_from_db()
 
@@ -489,22 +835,9 @@ async def api_miniapp_data(period: str = Query("today", description="today | 24h
     # Streamer sortieren: Erst LIVE, dann nach höchstem Umsatz
     streamers.sort(key=lambda x: (not x["is_live"], -x["eur_net"], -x["total_coins"]))
 
-    # 3. Live aktive Battles aus den aktiven Workern
+    # 3. Live aktive Battles aus den aktiven Workern (konsolidiert)
     diag = monitor_manager.get_all_diagnostics()
-    live_battles = []
-    for w in diag.get("workers", []):
-        ab = w.get("active_battle")
-        if not ab:
-            continue
-        uname = w.get("username", "")
-        s_info = streamer_map.get(w.get("streamer_id")) or streamer_map.get(uname.lower()) or {}
-        live_battles.append({
-            "streamer_id": w.get("streamer_id"),
-            "username": uname,
-            "display_name": s_info.get("display_name") or uname,
-            "avatar_url": s_info.get("avatar_url") or "",
-            "battle": ab,
-        })
+    live_battles = consolidate_live_battles(diag.get("workers", []), streamer_map)
 
     # 4. Kürzliche Battles
     battles_resp = get_battles_list(period=period, limit=25)
@@ -547,6 +880,249 @@ async def api_miniapp_battle_detail(battle_id: int):
     if not battle:
         raise HTTPException(status_code=404, detail="Battle nicht gefunden")
     return battle
+
+
+@app.post(
+    "/api/miniapp/auth",
+    tags=["Telegram Mini-App"],
+    summary="Authentifiziert den Telegram-Nutzer anhand von WebApp initData (HMAC-SHA256)",
+)
+async def api_miniapp_auth(payload: MiniAppAuthRequest, response: Response):
+    init_db()
+    validated = admin_auth_manager.validate_webapp_init_data(payload.init_data)
+    if not validated:
+        raise HTTPException(status_code=400, detail="Ungültige Telegram WebApp-Signatur")
+
+    user = validated.get("user") or {}
+    tg_id = user.get("id")
+    username = user.get("username")
+    first_name = user.get("first_name", "")
+
+    # DB-Prüfung auf Whitelist-Status und Admin-Rolle
+    if tg_id:
+        access_check = check_telegram_user_access(
+            telegram_id=int(tg_id),
+            username=username,
+            first_name=first_name,
+            chat_id=int(tg_id),
+        )
+    else:
+        access_check = {"allowed": False, "is_admin": False}
+
+    is_whitelisted = bool(access_check.get("allowed", False))
+    is_admin = bool(access_check.get("is_admin", False))
+    if not is_admin and admin_auth_manager.is_admin_user(telegram_id=tg_id, username=username):
+        is_admin = True
+        is_whitelisted = True
+
+    token = None
+    user_label = f"tg_{tg_id}" if tg_id else f"tg_{username or 'user'}"
+    if is_admin or is_whitelisted:
+        token = admin_auth_manager.create_session_token(
+            admin_label=user_label,
+            role="admin" if is_admin else "user",
+            is_allowed=is_whitelisted,
+        )
+        if is_admin:
+            _set_admin_session_cookie(response, admin_label=user_label)
+
+    try:
+        record_bot_session(
+            session_type="miniapp",
+            telegram_id=tg_id,
+            username=username or "",
+            first_name=first_name or "",
+            status="admin" if is_admin else ("whitelisted" if is_whitelisted else "user"),
+            details_json=json.dumps({"is_admin": is_admin, "is_whitelisted": is_whitelisted}),
+        )
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "authenticated": True,
+        "is_admin": is_admin,
+        "is_whitelisted": is_whitelisted,
+        "user": {
+            "id": tg_id,
+            "username": username,
+            "first_name": first_name,
+        },
+        "token": token,
+        "admin_label": user_label if (is_admin or is_whitelisted) else None,
+    }
+
+
+@app.get(
+    "/api/miniapp/auth/status",
+    tags=["Telegram Mini-App"],
+    summary="Prüft den aktuellen Authentifizierungsstatus der Mini-App Session",
+)
+async def api_miniapp_auth_status(
+    toktracker_admin_session: Optional[str] = Cookie(default=None),
+    x_admin_session: Optional[str] = Header(default=None, alias="X-Admin-Session"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    token = toktracker_admin_session or x_admin_session
+    if not token and authorization and authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+
+    session_payload = admin_auth_manager.verify_session_token(token)
+    if session_payload:
+        role = session_payload.get("role", "admin")
+        is_admin = (role == "admin")
+        is_allowed = bool(session_payload.get("is_allowed", True))
+        return {
+            "authenticated": True,
+            "is_admin": is_admin,
+            "is_whitelisted": is_allowed or is_admin,
+            "role": role,
+            "admin_label": session_payload.get("sub", "admin"),
+            "exp": session_payload.get("exp"),
+        }
+    is_public = (get_telegram_access_mode() == "public")
+    return {
+        "authenticated": False,
+        "is_admin": False,
+        "is_whitelisted": is_public,
+        "admin_label": None,
+    }
+
+
+@app.get(
+    "/api/miniapp/radar",
+    tags=["Telegram Mini-App", "Spenderradar & Chatlog"],
+    summary="Liefert aggregierte Daten für das Mini-App Spender-Radar (Whales, Sharks, Dolphins & Cross-Streamer)",
+)
+async def api_miniapp_radar(
+    period: str = Query("24h", description="today | 24h | 7d | 30d | all"),
+    min_tier: Optional[str] = Query(None, description="whale | shark | dolphin"),
+    cross_only: bool = Query(False, description="Nur Cross-Streamer Spender"),
+    vip_only: bool = Query(False, description="Nur VIP-Watchlist Spender"),
+    streamer_id: Optional[int] = Query(None, description="Filter nach Streamer-ID"),
+    search: Optional[str] = Query(None, description="Suchbegriff für Spender"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    toktracker_admin_session: Optional[str] = Cookie(default=None),
+    x_admin_session: Optional[str] = Header(default=None, alias="X-Admin-Session"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    init_db()
+    token = toktracker_admin_session or x_admin_session
+    if not token and authorization and authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+
+    is_authorized = False
+    is_admin = False
+
+    if token:
+        payload = admin_auth_manager.verify_session_token(token)
+        if payload:
+            is_admin = (payload.get("role") == "admin")
+            is_allowed = bool(payload.get("is_allowed", True))
+            if is_admin or is_allowed:
+                is_authorized = True
+
+    if not is_authorized and get_telegram_access_mode() == "public":
+        is_authorized = True
+
+    if not is_authorized:
+        return {
+            "ok": False,
+            "authorized": False,
+            "error": "unauthorized",
+            "message": "Dieser Bereich ist exklusiv für freigeschaltete Telegram-Nutzer verfügbar.",
+            "kpis": {},
+            "donors": [],
+            "streamers": [],
+        }
+
+    radar_data = await asyncio.to_thread(
+        get_donor_radar_data,
+        period=period,
+        min_tier=min_tier,
+        streamer_id=streamer_id,
+        cross_streamer_only=cross_only,
+        vip_only=vip_only,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+
+    return {
+        "ok": True,
+        "authorized": True,
+        "is_admin": is_admin,
+        "period": period,
+        "kpis": radar_data.get("kpis", {}),
+        "donors": radar_data.get("donors", []),
+        "streamers": radar_data.get("streamers", []),
+        "total_donors": len(radar_data.get("donors", [])),
+    }
+
+
+@app.post(
+    "/api/miniapp/auth/request_otp",
+    tags=["Telegram Mini-App"],
+    summary="Fordert einen 6-stelligen Login-Code an (Fallback für Webbrowser)",
+)
+async def api_miniapp_auth_request_otp(request: Request):
+    init_db()
+    client_host = request.client.host if request.client else "unbekannt"
+    res = await telegram_bot_service.send_admin_login_challenge(
+        identifier_hint=None,
+        client_info=f"Mini-App Web ({client_host})",
+    )
+    return res
+
+
+@app.post(
+    "/api/miniapp/auth/verify_otp",
+    tags=["Telegram Mini-App"],
+    summary="Verifiziert den 6-stelligen OTP-Code oder das Notfall-Admin-Passwort",
+)
+async def api_miniapp_auth_verify_otp(payload: MiniAppVerifyCodeRequest, response: Response):
+    admin_label = admin_auth_manager.verify_code(
+        code=payload.code,
+        challenge_id=payload.challenge_id,
+    )
+    if not admin_label:
+        raise HTTPException(
+            status_code=401,
+            detail="Ungültiger oder abgelaufener Einmal-Code.",
+        )
+    token = admin_auth_manager.create_session_token(admin_label=admin_label)
+    _set_admin_session_cookie(response, admin_label=admin_label)
+    return {
+        "ok": True,
+        "authenticated": True,
+        "is_admin": True,
+        "admin_label": admin_label,
+        "token": token,
+    }
+
+
+@app.post(
+    "/api/miniapp/auth/logout",
+    tags=["Telegram Mini-App"],
+    summary="Beendet die Admin-Session in der Mini-App",
+)
+async def api_miniapp_auth_logout(response: Response):
+    response.delete_cookie(key=AdminAuthManager.COOKIE_NAME, path="/")
+    return {"ok": True, "message": "Erfolgreich abgemeldet"}
+
+
+@app.get(
+    "/api/miniapp/analytics",
+    tags=["Telegram Mini-App"],
+    summary="Öffentliche Analytics- und Chart-Daten für die Mini-App",
+)
+async def api_miniapp_analytics(
+    period: str = Query("24h", description="all | today | 24h | 7d | 30d"),
+    streamer_id: Optional[int] = Query(None, description="Optionaler Einzelfilter nach Streamer"),
+):
+    init_db()
+    return get_analytics_data(streamer_id=streamer_id, period=period)
 
 
 # =====================================================================
@@ -681,9 +1257,7 @@ async def api_v1_streamer_single_report(
 @app.get("/api/overview", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
 @app.get("/api/v1/overview", tags=["Telegram Bot API"], dependencies=[Depends(verify_admin_or_api_key)])
 async def api_overview(period: str = Query("all", description="all | today | 24h | 7d | 30d")):
-    init_db()
-    monitor_manager.autostart_from_db()
-    data = get_dashboard_overview(period=period)
+    data = await asyncio.to_thread(get_dashboard_overview, period=period)
     for s in data["streamers"]:
         uname = s["username"]
         s["is_tracking_active"] = monitor_manager.is_tracking(uname)
@@ -702,9 +1276,239 @@ async def api_analytics(
     streamer_id: Optional[int] = Query(None, description="Optionale Streamer-ID für Einzelanalyse (sonst alle Streamer)"),
     period: str = Query("all", description="all | today | 24h | 7d | 30d"),
 ):
+    return await asyncio.to_thread(get_analytics_data, streamer_id=streamer_id, period=period)
+
+
+@app.get(
+    "/api/site-analytics",
+    tags=["Site & Bot Analytics"],
+    summary="Liefert aggregierte Daten zu Web-Traffic, Besuchern und Bot-Sessions",
+    dependencies=[Depends(verify_admin_or_api_key)],
+)
+@app.get(
+    "/api/v1/site-analytics",
+    tags=["Site & Bot Analytics"],
+    summary="Liefert aggregierte Daten zu Web-Traffic, Besuchern und Bot-Sessions",
+    dependencies=[Depends(verify_admin_or_api_key)],
+)
+async def api_site_analytics(
+    period: str = Query("today", description="all | today | 24h | 7d | 30d"),
+):
     init_db()
-    monitor_manager.autostart_from_db()
-    return get_analytics_data(streamer_id=streamer_id, period=period)
+    data = get_site_analytics_overview(period=period)
+    overview = get_dashboard_overview(period=period)
+    workers_list = []
+    for s in overview.get("streamers", []):
+        uname = s["username"]
+        diag = monitor_manager.get_worker_diagnostics(uname)
+        status = monitor_manager.get_status(uname)
+        workers_list.append({
+            "id": s["id"],
+            "username": uname,
+            "display_name": s.get("display_name") or uname,
+            "avatar_url": s.get("avatar_url"),
+            "is_live": s.get("is_live", 0),
+            "is_monitoring": monitor_manager.is_tracking(uname),
+            "status": status,
+            "connected_since": diag.get("connected_since") if diag else None,
+            "total_diamonds": s.get("total_diamonds", 0),
+            "gifts_received_session": diag.get("gifts_received_session", 0) if diag else 0,
+            "reconnect_count": diag.get("reconnect_attempts", 0) if diag else 0,
+            "last_seen_live": s.get("last_seen_live"),
+            "last_error": diag.get("last_error") if diag else (s.get("last_error") or ""),
+        })
+    data["tiktok_workers"] = workers_list
+    data["recent_challenges"] = admin_auth_manager.get_recent_challenges(limit=25)
+    data["telegram_diagnostics"] = telegram_bot_service.get_diagnostics()
+    return data
+
+
+
+@app.get(
+    "/api/donor-radar",
+    tags=["Spenderradar & Chatlog"],
+    summary="Liefert aggregierte Daten für das Spender-Radar (Whales, Sharks, Dolphins & Cross-Streamer)",
+    dependencies=[Depends(verify_radar_access)],
+)
+@app.get(
+    "/api/v1/donor-radar",
+    tags=["Spenderradar & Chatlog"],
+    summary="Liefert aggregierte Daten für das Spender-Radar (Whales, Sharks, Dolphins & Cross-Streamer)",
+    dependencies=[Depends(verify_radar_access)],
+)
+async def api_donor_radar(
+    period: str = Query("all", description="all | today | 24h | 7d | 30d"),
+    min_tier: Optional[str] = Query(None, description="whale | shark | dolphin"),
+    streamer_id: Optional[int] = Query(None, description="Filter nach Streamer-ID"),
+    cross_streamer_only: bool = Query(False, description="Nur Spender mit >= 2 Streamern anzeigen"),
+    vip_only: bool = Query(False, description="Nur Spender auf der VIP-Watchlist anzeigen"),
+    search: Optional[str] = Query(None, description="Suchbegriff für Username / Nickname"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    init_db()
+    data = await asyncio.to_thread(
+        get_donor_radar_data,
+        period=period,
+        min_tier=min_tier,
+        streamer_id=streamer_id,
+        cross_streamer_only=cross_streamer_only,
+        vip_only=vip_only,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+    return {"ok": True, "data": data}
+
+
+@app.get(
+    "/api/donor-radar/donors/{username}",
+    tags=["Spenderradar & Chatlog"],
+    summary="Liefert ein detailliertes Spender-Dossier inkl. Streamer-Verteilung, Top-Gifts und Chat-Historie",
+    dependencies=[Depends(verify_radar_access)],
+)
+@app.get(
+    "/api/v1/donor-radar/donors/{username}",
+    tags=["Spenderradar & Chatlog"],
+    summary="Liefert ein detailliertes Spender-Dossier inkl. Streamer-Verteilung, Top-Gifts und Chat-Historie",
+    dependencies=[Depends(verify_radar_access)],
+)
+async def api_donor_detail(username: str):
+    init_db()
+    details = await asyncio.to_thread(get_donor_details, username)
+    if not details:
+        raise HTTPException(status_code=404, detail="Spender nicht gefunden")
+    return {"ok": True, "data": details}
+
+
+@app.post(
+    "/api/donor-radar/donors/{username}/crm",
+    tags=["Spenderradar & Chatlog"],
+    summary="Aktualisiert VIP-Status, Tags und Notizen für einen Spender",
+    dependencies=[Depends(verify_radar_access)],
+)
+@app.post(
+    "/api/v1/donor-radar/donors/{username}/crm",
+    tags=["Spenderradar & Chatlog"],
+    summary="Aktualisiert VIP-Status, Tags und Notizen für einen Spender",
+    dependencies=[Depends(verify_radar_access)],
+)
+async def api_update_donor_crm(username: str, req: DonorCRMUpdateRequest):
+    init_db()
+    res = await asyncio.to_thread(
+        save_donor_crm,
+        username=username,
+        is_vip=req.is_vip,
+        tags=req.tags,
+        notes=req.notes,
+    )
+    return {"ok": True, "data": res}
+
+
+@app.post(
+    "/api/donor-radar/donors/{username}/toggle-vip",
+    tags=["Spenderradar & Chatlog"],
+    summary="Schaltet den VIP-Watchlist-Status eines Spenders um",
+    dependencies=[Depends(verify_radar_access)],
+)
+@app.post(
+    "/api/v1/donor-radar/donors/{username}/toggle-vip",
+    tags=["Spenderradar & Chatlog"],
+    summary="Schaltet den VIP-Watchlist-Status eines Spenders um",
+    dependencies=[Depends(verify_radar_access)],
+)
+async def api_toggle_donor_vip(username: str):
+    init_db()
+    res = await asyncio.to_thread(toggle_donor_vip, username)
+    return {"ok": True, "data": res}
+
+
+@app.get(
+    "/api/donor-radar/whale-alerts",
+    tags=["Spenderradar & Chatlog"],
+    summary="Liefert Echtzeit-Großspenden (Whale- & Shark-Events) für Live-Ticker und Audio-Alerts",
+    dependencies=[Depends(verify_radar_access)],
+)
+@app.get(
+    "/api/v1/donor-radar/whale-alerts",
+    tags=["Spenderradar & Chatlog"],
+    summary="Liefert Echtzeit-Großspenden (Whale- & Shark-Events) für Live-Ticker und Audio-Alerts",
+    dependencies=[Depends(verify_radar_access)],
+)
+async def api_whale_alerts(
+    min_coins: int = Query(1000, ge=50, le=100000, description="Mindestanzahl Coins für den Whale-Alert"),
+    after_id: Optional[int] = Query(None, description="Nur Geschenke mit ID > after_id abrufen"),
+    limit: int = Query(20, ge=1, le=100),
+):
+    init_db()
+    alerts = await asyncio.to_thread(
+        get_recent_whale_gifts,
+        min_coins=min_coins,
+        after_id=after_id,
+        limit=limit,
+    )
+    return {"ok": True, "alerts": alerts}
+
+
+@app.get(
+    "/api/donor-radar/loyalty-and-overlap",
+    tags=["Spenderradar & Chatlog"],
+    summary="Liefert netzwerkweite Frontenwechsler-Analyse und Streamer-Überschneidungsmatrix",
+    dependencies=[Depends(verify_radar_access)],
+)
+@app.get(
+    "/api/v1/donor-radar/loyalty-and-overlap",
+    tags=["Spenderradar & Chatlog"],
+    summary="Liefert netzwerkweite Frontenwechsler-Analyse und Streamer-Überschneidungsmatrix",
+    dependencies=[Depends(verify_radar_access)],
+)
+async def api_loyalty_and_overlap(
+    min_coins: int = Query(50, ge=1, description="Mindestmünzen für Frontenwechsler"),
+    days_recent: int = Query(14, ge=1, le=90, description="Zeitfenster für die aktuelle Periode in Tagen"),
+):
+    init_db()
+    data = await asyncio.to_thread(
+        get_network_loyalty_and_overlap,
+        min_coins=min_coins,
+        days_recent=days_recent,
+    )
+    return {"ok": True, "data": data}
+
+
+@app.get(
+    "/api/chat-logs",
+    tags=["Spenderradar & Chatlog"],
+    summary="Liefert Live- und historische Chatlogs pro Streamer oder global",
+    dependencies=[Depends(verify_radar_access)],
+)
+@app.get(
+    "/api/v1/chat-logs",
+    tags=["Spenderradar & Chatlog"],
+    summary="Liefert Live- und historische Chatlogs pro Streamer oder global",
+    dependencies=[Depends(verify_radar_access)],
+)
+async def api_chat_logs(
+    streamer_id: Optional[int] = Query(None, description="Filter nach Streamer-ID"),
+    search: Optional[str] = Query(None, description="Textsuche in Chat-Nachrichten"),
+    min_tier: Optional[str] = Query(None, description="whale | shark | dolphin"),
+    only_whales: bool = Query(False, description="Nur Spender-Nachrichten anzeigen"),
+    before_id: Optional[int] = Query(None, description="Ältere Nachrichten abrufen (Paginierung)"),
+    after_id: Optional[int] = Query(None, description="Neuere Nachrichten abrufen (Live-Polling)"),
+    limit: int = Query(100, ge=1, le=500),
+):
+    init_db()
+    messages = await asyncio.to_thread(
+        get_chat_messages,
+        streamer_id=streamer_id,
+        limit=limit,
+        search=search,
+        min_tier=min_tier,
+        only_whales=only_whales,
+        before_id=before_id,
+        after_id=after_id,
+    )
+    return {"ok": True, "messages": messages, "count": len(messages)}
+
 
 
 @app.get("/api/battles", tags=["TikTok Battles"], dependencies=[Depends(verify_admin_or_api_key)])
@@ -729,18 +1533,14 @@ async def api_get_battles(
         limit=limit,
         offset=offset,
     )
-    # Laufende Battles aus aktiven Workern erfassen
+    # Laufende Battles aus aktiven Workern erfassen (konsolidiert)
     diag = monitor_manager.get_all_diagnostics()
-    live_active = [
-        {
-            "streamer_id": s["streamer_id"],
-            "username": s["username"],
-            "battle": s["active_battle"],
-        }
-        for s in diag.get("workers", [])
-        if s.get("active_battle")
-    ]
-    data["live_active_battles"] = live_active
+    streamers_summary = {s["id"]: s for s in get_streamers_summary()}
+    data["live_active_battles"] = consolidate_live_battles(
+        diag.get("workers", []),
+        streamers_summary,
+        filter_streamer_id=streamer_id,
+    )
     return data
 
 
@@ -770,7 +1570,14 @@ async def api_get_battle_detail(battle_id: int):
 async def api_system_status():
     diag = monitor_manager.get_all_diagnostics()
     diag["telegram_bot"] = telegram_bot_service.get_diagnostics()
+    diag["system_health"] = get_system_health()
     return diag
+
+
+@app.get("/api/system/health", tags=["System & Workers"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.get("/api/v1/system/health", tags=["System & Workers"], dependencies=[Depends(verify_admin_or_api_key)])
+async def api_system_health(force_refresh: bool = False):
+    return get_system_health(force_refresh=force_refresh)
 
 
 @app.get("/api/streamers/{identifier}", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])

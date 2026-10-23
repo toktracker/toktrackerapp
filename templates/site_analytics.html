@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="de" data-theme="dark">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>toktracker – Website &amp; Bot Analysen</title>
+
+    <script>
+        (function() {
+            try {
+                const savedTheme = localStorage.getItem("toktracker_theme") || "dark";
+                document.documentElement.setAttribute("data-theme", savedTheme);
+            } catch (e) {}
+        })();
+    </script>
+    <link rel="icon" type="image/jpeg" href="/pictures/bot_avatar.jpg" />
+    <link rel="stylesheet" href="/static/style.css?v=2.5.2" />
+    <script src="/static/chart.umd.min.js"></script>
+
+    <style>
+        .analytics-grid-kpis {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            gap: 14px;
+            margin-bottom: 20px;
+        }
+        .analytics-kpi-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md, 6px);
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            transition: transform 0.15s ease, border-color 0.15s ease;
+        }
+        .analytics-kpi-card:hover {
+            transform: translateY(-2px);
+            border-color: var(--border-strong);
+        }
+        .analytics-kpi-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+        .analytics-kpi-val {
+            font-size: 26px;
+            font-weight: 800;
+            font-family: var(--font-mono, "JetBrains Mono", Consolas, monospace);
+            color: var(--text-main);
+            line-height: 1.2;
+            margin-bottom: 4px;
+        }
+        .analytics-kpi-sub {
+            font-size: 11.5px;
+            color: var(--text-muted);
+        }
+        .analytics-charts-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        @media (max-width: 960px) {
+            .analytics-charts-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        .chart-box {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md, 6px);
+            padding: 16px 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            display: flex;
+            flex-direction: column;
+        }
+        .chart-box-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 14px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .chart-box-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .chart-canvas-wrap {
+            position: relative;
+            flex: 1;
+            min-height: 260px;
+            max-height: 320px;
+        }
+        .ip-hash-badge {
+            font-family: var(--font-mono, monospace);
+            font-size: 11px;
+            background: rgba(255,255,255,0.06);
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: #94a3b8;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .status-badge-ok {
+            background: rgba(16, 185, 129, 0.15);
+            color: #10b981;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            padding: 2px 7px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: 700;
+            font-family: var(--font-mono, monospace);
+        }
+        .status-badge-err {
+            background: rgba(239, 68, 68, 0.15);
+            color: #ef4444;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            padding: 2px 7px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: 700;
+            font-family: var(--font-mono, monospace);
+        }
+        .status-badge-redirect {
+            background: rgba(245, 158, 11, 0.15);
+            color: #f59e0b;
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            padding: 2px 7px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: 700;
+            font-family: var(--font-mono, monospace);
+        }
+    </style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="app-header">
+    <div class="header-inner">
+        <a href="/admin" class="brand-block">
+            <img src="/pictures/bot_avatar.jpg" alt="toktracker" class="brand-logo" />
+            <div class="brand-text">
+                <div class="brand-title-row">
+                    <h1 class="brand-title">toktracker</h1>
+                    <span class="brand-mode-tag" style="background: linear-gradient(135deg, #0284c7 0%, #6366f1 100%); color:#fff;">WEBSITE &amp; BOT ANALYTICS</span>
+                </div>
+                <span class="brand-subtitle">TRAFFIC · BESUCHER · BOT-SESSIONS · AUDIT</span>
+            </div>
+        </a>
+        <div class="status-strip">
+            <span class="pill">Admin: <strong>{{ admin_sub or "TELEGRAM" }}</strong></span>
+            <span class="pill">TikTokLive: <strong>{{ "AKTIV" if tiktoklive_available else "INAKTIV" }}</strong></span>
+            <span class="pill">Telegram-Bot: <strong>{{ telegram_diag.state | upper }}</strong></span>
+            <a class="btn-link sm" href="/admin">← Admin-Dashboard</a>
+            <a class="btn-link sm" href="/donor-radar" style="color: #38bdf8; font-weight: 700;">🐋 Spender-Radar</a>
+            <a class="btn-link primary sm" href="/">Öffentliches Panel →</a>
+            <a class="btn-link sm" href="/logout">Abmelden</a>
+
+        </div>
+    </div>
+</header>
+
+<!-- Controls & Period Navigation -->
+<nav class="nav-bar">
+    <div class="nav-inner" style="justify-content: space-between;">
+        <div class="tab-list">
+            <button type="button" class="tab-btn active" data-period="today">Heute</button>
+            <button type="button" class="tab-btn" data-period="24h">24 Stunden</button>
+            <button type="button" class="tab-btn" data-period="7d">7 Tage</button>
+            <button type="button" class="tab-btn" data-period="30d">30 Tage</button>
+            <button type="button" class="tab-btn" data-period="all">Gesamt</button>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <label style="font-size: 11.5px; color: var(--text-muted); display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
+                <input type="checkbox" id="chkAutoRefresh" checked style="accent-color: #38bdf8;" />
+                <span>Auto-Refresh (30s)</span>
+            </label>
+            <button type="button" class="btn sm" id="btnManualRefresh" style="display: inline-flex; align-items: center; gap: 6px;">
+                <span id="refreshSpinner" style="display: inline-block;">🔄</span> Aktualisieren
+            </button>
+        </div>
+    </div>
+</nav>
+
+<main class="app-main" style="max-width: 1360px; margin: 0 auto; padding: 20px 16px;">
+
+    <!-- KPI Cards Grid -->
+    <div class="analytics-grid-kpis">
+        <div class="analytics-kpi-card">
+            <div class="analytics-kpi-header">
+                <span>🌐 Seitenaufrufe</span>
+                <span style="color: #38bdf8;">Views</span>
+            </div>
+            <div class="analytics-kpi-val" id="kpiTotalViews">0</div>
+            <div class="analytics-kpi-sub" id="kpiTotalViewsSub">Gefilterte HTML-Aufrufe</div>
+        </div>
+
+        <div class="analytics-kpi-card">
+            <div class="analytics-kpi-header">
+                <span>👤 Unique Visitors</span>
+                <span style="color: #10b981;">Besucher</span>
+            </div>
+            <div class="analytics-kpi-val" id="kpiUniqueVisitors" style="color: #10b981;">0</div>
+            <div class="analytics-kpi-sub">DSGVO-anonyme Hashes</div>
+        </div>
+
+        <div class="analytics-kpi-card">
+            <div class="analytics-kpi-header">
+                <span>⚡ Durchschn. Latenz</span>
+                <span style="color: #f59e0b;">Speed</span>
+            </div>
+            <div class="analytics-kpi-val" id="kpiAvgLatency">0 ms</div>
+            <div class="analytics-kpi-sub">Server Response Time</div>
+        </div>
+
+        <div class="analytics-kpi-card">
+            <div class="analytics-kpi-header">
+                <span>📱 Mobile vs Desktop</span>
+                <span style="color: #c084fc;">Geräte</span>
+            </div>
+            <div class="analytics-kpi-val" id="kpiDeviceSplit" style="font-size: 22px;">0% / 0%</div>
+            <div class="analytics-kpi-sub" id="kpiDeviceSplitSub">Desktop / Mobile</div>
+        </div>
+
+        <div class="analytics-kpi-card">
+            <div class="analytics-kpi-header">
+                <span>🤖 Bot- &amp; MiniApp-Aktivität</span>
+                <span style="color: #38bdf8;">Sessions</span>
+            </div>
+            <div class="analytics-kpi-val" id="kpiBotSessions">0</div>
+            <div class="analytics-kpi-sub" id="kpiBotSessionsSub">Telegram Nutzer &amp; 2FA</div>
+        </div>
+
+        <div class="analytics-kpi-card">
+            <div class="analytics-kpi-header">
+                <span>📡 TikTok-Worker</span>
+                <span style="color: #ec4899;">Live</span>
+            </div>
+            <div class="analytics-kpi-val" id="kpiActiveWorkers">0 aktiv</div>
+            <div class="analytics-kpi-sub" id="kpiActiveWorkersSub">Streamer im Monitoring</div>
+        </div>
+    </div>
+
+    <!-- Charts Section -->
+    <div class="analytics-charts-grid">
+        <!-- Traffic Timeline Chart -->
+        <div class="chart-box">
+            <div class="chart-box-header">
+                <div class="chart-box-title">
+                    <span>📈</span> Traffic- &amp; Besucher-Verlauf
+                </div>
+                <div style="font-size: 11px; color: var(--text-muted);" id="chartTimelineSub">
+                    Aufrufe und Unique Visitors
+                </div>
+            </div>
+            <div class="chart-canvas-wrap">
+                <canvas id="chartTrafficTimeline"></canvas>
+            </div>
+        </div>
+
+        <!-- Page Paths Breakdown Chart -->
+        <div class="chart-box">
+            <div class="chart-box-header">
+                <div class="chart-box-title">
+                    <span>🧭</span> Seiten-Verteilung
+                </div>
+                <div style="font-size: 11px; color: var(--text-muted);">
+                    Häufigste Pfade
+                </div>
+            </div>
+            <div class="chart-canvas-wrap">
+                <canvas id="chartPathsBreakdown"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Data Tables & Audits Navigation Tabs -->
+    <div class="tab-list" style="margin-top: 28px; margin-bottom: 16px; border-bottom: 1px solid var(--border-color);">
+        <button type="button" class="tab-btn active" id="tabBtnPaths" onclick="switchSection('sectionPaths')">
+            📑 Seiten-Statistik
+        </button>
+        <button type="button" class="tab-btn" id="tabBtnLog" onclick="switchSection('sectionLog')">
+            ⚡ Live-Traffic Log (50)
+        </button>
+        <button type="button" class="tab-btn" id="tabBtnBotSessions" onclick="switchSection('sectionBotSessions')">
+            🤖 Telegram &amp; Mini-App Sessions
+        </button>
+        <button type="button" class="tab-btn" id="tabBtnWorkers" onclick="switchSection('sectionWorkers')">
+            📡 TikTok-Worker Sessions
+        </button>
+        <button type="button" class="tab-btn" id="tabBtnUsers" onclick="switchSection('sectionUsers')">
+            👥 Registrierte Telegram-User
+        </button>
+    </div>
+
+    <!-- Section 1: Seiten & Pfade Statistik -->
+    <section id="sectionPaths" class="analytics-section">
+        <div class="card" style="padding: 0; overflow: hidden;">
+            <div style="padding: 14px 18px; border-bottom: 1px solid var(--border-subtle); font-weight: 700; font-size: 13.5px; display: flex; justify-content: space-between; align-items: center;">
+                <span>Beliebteste Pfade &amp; Seiten</span>
+                <span class="pill" id="badgePathsCount">0 Pfade</span>
+            </div>
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Pfad (URL)</th>
+                            <th>Aufrufe (Views)</th>
+                            <th class="hide-sm">Eindeutige Besucher</th>
+                            <th class="hide-sm">Ø Latenz</th>
+                            <th>Anteil am Traffic</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbodyPaths">
+                        <tr><td colspan="5" style="text-align:center; padding: 20px; color: var(--text-muted);">Lade Daten...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- Section 2: Live-Traffic Log -->
+    <section id="sectionLog" class="analytics-section" style="display: none;">
+        <div class="card" style="padding: 0; overflow: hidden;">
+            <div style="padding: 14px 18px; border-bottom: 1px solid var(--border-subtle); font-weight: 700; font-size: 13.5px; display: flex; justify-content: space-between; align-items: center;">
+                <span>Echtzeit-Aufrufe (Die letzten 50 Seitenaufrufe)</span>
+                <span class="pill">DSGVO-Anonymisiert</span>
+            </div>
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Zeitpunkt</th>
+                            <th>Pfad</th>
+                            <th class="hide-sm">Gerät / Typ</th>
+                            <th>Status</th>
+                            <th class="hide-sm">Antwortzeit</th>
+                            <th class="hide-md">Besucher-Hash</th>
+                            <th class="hide-sm">Referrer</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbodyRecentViews">
+                        <tr><td colspan="7" style="text-align:center; padding: 20px; color: var(--text-muted);">Lade Daten...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- Section 3: Telegram & Mini-App Sessions -->
+    <section id="sectionBotSessions" class="analytics-section" style="display: none;">
+        <div class="card" style="padding: 0; overflow: hidden; margin-bottom: 20px;">
+            <div style="padding: 14px 18px; border-bottom: 1px solid var(--border-subtle); font-weight: 700; font-size: 13.5px; display: flex; justify-content: space-between; align-items: center;">
+                <span>Mini-App Starts &amp; 2FA-Challenges</span>
+                <span class="pill" id="badgeBotSessionsCount">0 Sessions</span>
+            </div>
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Session-Typ</th>
+                            <th>Telegram-ID / Benutzer</th>
+                            <th>Status</th>
+                            <th class="hide-sm">IP-Hash (Client)</th>
+                            <th class="hide-md">Erstellt am</th>
+                            <th class="hide-sm">Letzte Aktivität</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbodyBotSessions">
+                        <tr><td colspan="6" style="text-align:center; padding: 20px; color: var(--text-muted);">Lade Daten...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 2FA Challenges Live Log -->
+        <div class="card" style="padding: 0; overflow: hidden;">
+            <div style="padding: 14px 18px; border-bottom: 1px solid var(--border-subtle); font-weight: 700; font-size: 13.5px;">
+                <span>Aktive &amp; Kürzliche 2FA-Login Challenges</span>
+            </div>
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th class="hide-sm">Challenge-ID</th>
+                            <th>Code</th>
+                            <th>Status</th>
+                            <th class="hide-sm">Client Info</th>
+                            <th>Freigegeben durch</th>
+                            <th class="hide-sm">Erstellt</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbodyChallenges">
+                        <tr><td colspan="6" style="text-align:center; padding: 20px; color: var(--text-muted);">Keine aktiven Challenges</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- Section 4: TikTok-Worker Sessions -->
+    <section id="sectionWorkers" class="analytics-section" style="display: none;">
+        <div class="card" style="padding: 0; overflow: hidden;">
+            <div style="padding: 14px 18px; border-bottom: 1px solid var(--border-subtle); font-weight: 700; font-size: 13.5px; display: flex; justify-content: space-between; align-items: center;">
+                <span>TikTokLive Worker Verbindungsstatus</span>
+                <span class="pill" id="badgeWorkerCount">0 Worker</span>
+            </div>
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Streamer</th>
+                            <th>Status</th>
+                            <th class="hide-sm">Laufzeit / Start</th>
+                            <th>Geschenke</th>
+                            <th class="hide-sm">Reconnects</th>
+                            <th class="hide-md">Letzter Fehler / Hinweis</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbodyWorkers">
+                        <tr><td colspan="6" style="text-align:center; padding: 20px; color: var(--text-muted);">Lade Worker-Status...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- Section 5: Registrierte Telegram-User -->
+    <section id="sectionUsers" class="analytics-section" style="display: none;">
+        <div class="card" style="padding: 0; overflow: hidden;">
+            <div style="padding: 14px 18px; border-bottom: 1px solid var(--border-subtle); font-weight: 700; font-size: 13.5px; display: flex; justify-content: space-between; align-items: center;">
+                <span>Registrierte Telegram-Nutzer &amp; Rollen</span>
+                <span class="pill" id="badgeUsersCount">0 Nutzer</span>
+            </div>
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th class="hide-sm">Telegram ID</th>
+                            <th>Benutzername</th>
+                            <th class="hide-sm">Vorname</th>
+                            <th>Rolle</th>
+                            <th>Freigabe</th>
+                            <th class="hide-md">Zuletzt gesehen</th>
+                            <th class="hide-sm">Registriert am</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbodyUsers">
+                        <tr><td colspan="7" style="text-align:center; padding: 20px; color: var(--text-muted);">Lade Nutzer...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+</main>
+
+<footer class="app-footer">
+    <div>toktracker · WEBSITE &amp; BOT ANALYTICS</div>
+    <div>
+        <a href="/admin">← Zurück zum Admin-Dashboard</a> · <a href="/donor-radar">🐋 Spender-Radar &amp; Chatlogs</a> · <a href="/">Öffentliches User-Panel</a> · <a href="/docs" target="_blank">API Dokumentation</a> · <a href="/logout">Abmelden</a>
+    </div>
+
+</footer>
+
+<script src="/static/site_analytics.js?v=1.0.2"></script>
+</body>
+</html>

@@ -7,9 +7,11 @@
     
     <!-- Telegram WebApp SDK -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <!-- Bundled Chart.js for rich mobile analytics -->
+    <script src="/static/chart.umd.min.js"></script>
     
     <link rel="icon" type="image/jpeg" href="/pictures/bot_avatar.jpg" />
-    <link rel="stylesheet" href="/static/miniapp.css?v=2.0.0" />
+    <link rel="stylesheet" href="/static/miniapp.css?v=2.5.1" />
 </head>
 <body>
 
@@ -22,6 +24,7 @@
             <div>
                 <div class="ma-brand-title">
                     toktracker <span class="ma-badge">Mini-App</span>
+                    <span class="ma-admin-indicator" id="maHeaderAdminBadge" style="display: none;">👑 ADMIN</span>
                 </div>
                 <div class="ma-brand-sub" id="kpiLiveCount">-- LIVE</div>
             </div>
@@ -38,8 +41,8 @@
 
     <!-- Zeitraum Pills -->
     <div class="ma-period-selector">
-        <button type="button" class="period-pill active" data-period="today">Heute</button>
-        <button type="button" class="period-pill" data-period="24h">24 Stunden</button>
+        <button type="button" class="period-pill" data-period="today">Heute</button>
+        <button type="button" class="period-pill active" data-period="24h">24 Stunden</button>
         <button type="button" class="period-pill" data-period="7d">7 Tage</button>
         <button type="button" class="period-pill" data-period="30d">30 Tage</button>
         <button type="button" class="period-pill" data-period="all">Gesamt</button>
@@ -78,29 +81,11 @@
     </div>
 
     <!-- ============================================================== -->
-    <!-- TAB 1: BATTLES & LIVE MATCHES                                  -->
+    <!-- TAB 1: STREAMER ÜBERSICHT                                      -->
     <!-- ============================================================== -->
-    <section class="ma-tab-view active" id="tab-matches">
-        <!-- Live Active Battles Area -->
-        <div id="maLiveBattlesContainer"></div>
-
+    <section class="ma-tab-view active" id="tab-streamers">
         <div class="section-head">
-            <div class="section-title">⚔️ Match-Historie (1v1, 2v2, 3er & 4er)</div>
-        </div>
-        <div id="maRecentBattlesContainer">
-            <div class="ma-empty-state">
-                <div class="ma-empty-icon">⏳</div>
-                <div>Lade Matches & Duelle...</div>
-            </div>
-        </div>
-    </section>
-
-    <!-- ============================================================== -->
-    <!-- TAB 2: STREAMER ÜBERSICHT                                      -->
-    <!-- ============================================================== -->
-    <section class="ma-tab-view" id="tab-streamers">
-        <div class="section-head">
-            <div class="section-title">👥 Streamer Monitor & Ranking</div>
+            <div class="section-title">👥 Streamer Monitor &amp; Ranking</div>
         </div>
         <div id="maStreamersContainer">
             <div class="ma-empty-state">
@@ -111,7 +96,161 @@
     </section>
 
     <!-- ============================================================== -->
-    <!-- TAB 3: LIVE GIFT TICKER                                        -->
+    <!-- TAB 3: ANALYTICS & GRAPHEN (ÖFFENTLICH)                       -->
+    <!-- ============================================================== -->
+    <section class="ma-tab-view" id="tab-analytics">
+        <div class="section-head">
+            <div class="section-title">📊 Analytics &amp; Deep-Dive <span id="maAnalyticsTimestamp" style="font-size: 11px; font-weight: normal; color: var(--text-muted); margin-left: 6px;"></span></div>
+            <select id="maAnalyticsStreamerSelect" class="ma-select-mini">
+                <option value="all">Alle Streamer</option>
+            </select>
+        </div>
+
+        <!-- Analytics Mini-KPI Grid (4 Cards 2x2 on Mobile) -->
+        <div class="ma-analytics-kpi-row">
+            <div class="ma-mini-kpi-card">
+                <div class="ma-mini-kpi-label">👤 Eindeutige Spender</div>
+                <div class="ma-mini-kpi-val" id="maKpiUniqueGifters">0</div>
+                <div class="ma-mini-kpi-sub" id="maKpiAvgPerGifter">Ø 0,00 € / Spender</div>
+            </div>
+            <div class="ma-mini-kpi-card">
+                <div class="ma-mini-kpi-label">💎 Ø Coins / Gift</div>
+                <div class="ma-mini-kpi-val" id="maKpiAvgCoinsGift">0</div>
+                <div class="ma-mini-kpi-sub" id="maKpiWhaleShare">Top 5: 0% Anteil</div>
+            </div>
+            <div class="ma-mini-kpi-card">
+                <div class="ma-mini-kpi-label">🛍️ Brutto Kaufwert</div>
+                <div class="ma-mini-kpi-val" id="maKpiGrossRevenue">0,00 €</div>
+                <div class="ma-mini-kpi-sub" id="maKpiNetQuote">Netto-Quote: 0%</div>
+            </div>
+            <div class="ma-mini-kpi-card">
+                <div class="ma-mini-kpi-label">⚡ Transaktionen</div>
+                <div class="ma-mini-kpi-val" id="maKpiTotalEvents">0</div>
+                <div class="ma-mini-kpi-sub" id="maKpiCadence">0 Geschenke gesamt</div>
+            </div>
+        </div>
+
+        <!-- Timeline Chart Card with Multi-Metric Selector -->
+        <div class="ma-card ma-chart-card">
+            <div class="chart-header-row">
+                <div style="flex: 1; min-width: 0; padding-right: 8px;">
+                    <div class="chart-title" id="maTimelineTitle">Einnahmen- &amp; Metrik-Verlauf</div>
+                    <div class="chart-subtitle" id="maTimelineSub">Dynamische Analyse über Zeit</div>
+                </div>
+                <div class="chart-type-toggle">
+                    <button type="button" class="ma-chart-type-btn active" id="maBtnChartLine" title="Linien-Diagramm">📈</button>
+                    <button type="button" class="ma-chart-type-btn" id="maBtnChartBar" title="Balken-Diagramm">📊</button>
+                    <button type="button" class="ma-chart-type-btn" id="maBtnChartArea" title="Flächen-Diagramm">🌊</button>
+                </div>
+            </div>
+
+            <!-- Categorized Dropdown Selector -->
+            <div class="ma-metric-dropdown-wrap">
+                <select id="maTimelineMetricSelect" class="ma-metric-dropdown">
+                    <optgroup label="💰 Finanzen &amp; Umsatz">
+                        <option value="both" selected>💰 Kombi: Coins &amp; Netto EUR (Dual-Achse)</option>
+                        <option value="eur">💶 Netto Creator-Auszahlung (€ EUR)</option>
+                        <option value="usd">💵 Netto Creator-Auszahlung ($ USD)</option>
+                        <option value="gross">🛍️ Brutto Zuschauer-Kaufwert (€ EUR)</option>
+                        <option value="gross_usd">🏷️ Brutto Zuschauer-Kaufwert ($ USD)</option>
+                        <option value="cumulative_eur">📈 Kumulativ Netto-Erlös (€ Aufsummiert)</option>
+                        <option value="cumulative_coins">📊 Kumulativ Coins (💎 Aufsummiert)</option>
+                    </optgroup>
+                    <optgroup label="💎 Volumen &amp; Frequenz">
+                        <option value="coins">💎 TikTok Diamanten &amp; Münzen</option>
+                        <option value="events">🎁 Gift-Events (Transaktionsanzahl)</option>
+                        <option value="gifters">👤 Aktive Spender (Unique Gifters)</option>
+                        <option value="multi">👥 Top-Streamer Vergleich (Coins über Zeit)</option>
+                    </optgroup>
+                    <optgroup label="🎯 Durchschnitte &amp; Intensität">
+                        <option value="avg_gifter">🎯 Ø Erlös pro Spender (€ / Gifter)</option>
+                        <option value="avg_gift">⚡ Ø Münzen pro Geschenk (Coins / Gift)</option>
+                    </optgroup>
+                </select>
+            </div>
+
+            <!-- Horizontal Fast-Filter Pills (Thumb Scroll on Mobile) -->
+            <div class="ma-metric-selector" id="maMetricSelector">
+                <button type="button" class="ma-metric-pill active" data-metric="both">💰 Kombi</button>
+                <button type="button" class="ma-metric-pill" data-metric="eur">💶 Netto EUR</button>
+                <button type="button" class="ma-metric-pill" data-metric="usd">💵 Netto USD</button>
+                <button type="button" class="ma-metric-pill" data-metric="gross">🛍️ Brutto EUR</button>
+                <button type="button" class="ma-metric-pill" data-metric="coins">💎 Coins</button>
+                <button type="button" class="ma-metric-pill" data-metric="cumulative_eur">📈 Kumulativ</button>
+                <button type="button" class="ma-metric-pill" data-metric="multi">👥 Streamer</button>
+                <button type="button" class="ma-metric-pill" data-metric="events">🎁 Events</button>
+                <button type="button" class="ma-metric-pill" data-metric="gifters">👤 Spender</button>
+                <button type="button" class="ma-metric-pill" data-metric="avg_gifter">🎯 Ø/Spender</button>
+                <button type="button" class="ma-metric-pill" data-metric="avg_gift">⚡ Ø/Gift</button>
+            </div>
+
+            <!-- Chart Canvas -->
+            <div class="ma-chart-wrap" style="height: 235px;">
+                <canvas id="maChartTimeline"></canvas>
+            </div>
+
+            <!-- Live Key Stats Strip -->
+            <div class="ma-chart-stats-strip" id="maChartStatsStrip">
+                <div class="ma-chart-stat-item">
+                    <span class="ma-stat-label">🔝 Peak</span>
+                    <strong class="ma-stat-val" id="maStatPeak">-</strong>
+                </div>
+                <div class="ma-chart-stat-item">
+                    <span class="ma-stat-label">📊 Ø Intervall</span>
+                    <strong class="ma-stat-val" id="maStatAvg">-</strong>
+                </div>
+                <div class="ma-chart-stat-item">
+                    <span class="ma-stat-label">➕ Summe</span>
+                    <strong class="ma-stat-val" id="maStatTotal">-</strong>
+                </div>
+            </div>
+        </div>
+
+        <!-- Streamer Revenue Ranking Chart -->
+        <div class="section-head" style="margin-top: 16px;">
+            <div class="section-title">👥 Streamer-Umsatzvergleich</div>
+        </div>
+        <div class="ma-card ma-chart-card">
+            <div class="ma-chart-wrap" style="height: 200px;">
+                <canvas id="maChartStreamerCompare"></canvas>
+            </div>
+        </div>
+
+        <!-- Top Spender Ranking -->
+        <div class="section-head" style="margin-top: 16px;">
+            <div class="section-title">🏆 Top Spender &amp; Whales</div>
+        </div>
+        <div id="maTopGiftersContainer" class="ma-card" style="padding: 0;">
+            <div class="ma-empty-state">
+                <div class="ma-empty-icon">⏳</div>
+                <div>Lade Spender-Rangliste...</div>
+            </div>
+        </div>
+
+        <!-- Gift Distribution Chart -->
+        <div class="section-head" style="margin-top: 16px;">
+            <div class="section-title">🎁 Beliebteste Geschenke</div>
+        </div>
+        <div class="ma-card ma-chart-card">
+            <div class="ma-chart-wrap" style="height: 200px;">
+                <canvas id="maChartGiftDist"></canvas>
+            </div>
+            <div id="maTopGiftsList" class="ma-gift-dist-list"></div>
+        </div>
+
+        <!-- Time of Day Chart -->
+        <div class="section-head" style="margin-top: 16px;">
+            <div class="section-title">⏰ Aktivität nach Tageszeit</div>
+        </div>
+        <div class="ma-card ma-chart-card">
+            <div class="ma-chart-wrap" style="height: 180px;">
+                <canvas id="maChartTimeOfDay"></canvas>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============================================================== -->
+    <!-- TAB 4: LIVE GIFT TICKER                                        -->
     <!-- ============================================================== -->
     <section class="ma-tab-view" id="tab-gifts">
         <div class="section-head">
@@ -125,22 +264,392 @@
         </div>
     </section>
 
+    <!-- ============================================================== -->
+    <!-- TAB 4: SPENDER-RADAR (WHALES & GROSS-SPENDER)                   -->
+    <!-- ============================================================== -->
+    <section class="ma-tab-view" id="tab-radar">
+        <div class="section-head">
+            <div class="section-title">🐋 Spender-Radar &amp; Whales</div>
+            <div class="section-badge" id="maRadarTotalBadge">0 erfasst</div>
+        </div>
+
+        <!-- Auth Gate for Non-Whitelisted Users -->
+        <div id="maRadarAuthGate" class="ma-card" style="display: none; text-align: center; padding: 24px 16px;">
+            <div style="font-size: 36px; margin-bottom: 8px;">🔐</div>
+            <h3 style="font-size: 16px; margin-bottom: 6px;">Spender-Radar exklusiv</h3>
+            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;" id="maRadarAuthGateMsg">
+                Dieser Bereich ist exklusiv für freigeschaltete Mitglieder unserer Telegram-Community zugänglich.
+            </p>
+            <p style="font-size: 11.5px; color: var(--text-muted); line-height: 1.5;">
+                Starte den Bot <strong>@TokTrackerBot</strong> im Telegram-Chat mit <code>/start</code>, um Zugang zu erhalten, oder logge dich im Admin-Tab ein.
+            </p>
+        </div>
+
+        <!-- Radar Content (Visible when authenticated / authorized) -->
+        <div id="maRadarContent">
+
+            <!-- Live Whale-Alert Ticker Bar -->
+            <div class="ma-whale-ticker-bar" id="maWhaleTickerBar">
+                <div class="ma-ticker-label">
+                    <span class="ma-ticker-pulse"></span>
+                    <span>WHALES</span>
+                </div>
+                <div class="ma-ticker-track" id="maWhaleTickerTrack">
+                    <span class="mono muted" style="font-size: 11px; padding: 0 8px;">Lade Großspenden (&ge; 1.000 Coins)...</span>
+                </div>
+                <div class="ma-ticker-controls">
+                    <button type="button" class="ma-ticker-btn" id="maBtnToggleWhaleSound" title="Ton bei Whale-Alerts">
+                        <span id="maWhaleSoundIcon">🔇</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Radar Mini-KPI Row (5 Cards) -->
+            <div class="ma-radar-kpi-row">
+                <div class="ma-radar-kpi-card whale">
+                    <div class="ma-radar-kpi-header">
+                        <span>🐋 Whales</span>
+                        <span class="mono" style="font-size: 9.5px;">&ge; 10k</span>
+                    </div>
+                    <div class="ma-radar-kpi-val" id="maRadarKpiWhales">0</div>
+                    <div class="ma-radar-kpi-sub">~50€+ Netto</div>
+                </div>
+                <div class="ma-radar-kpi-card shark">
+                    <div class="ma-radar-kpi-header">
+                        <span>🦈 Sharks</span>
+                        <span class="mono" style="font-size: 9.5px;">&ge; 2.5k</span>
+                    </div>
+                    <div class="ma-radar-kpi-val" id="maRadarKpiSharks">0</div>
+                    <div class="ma-radar-kpi-sub">~12.50€+ Netto</div>
+                </div>
+                <div class="ma-radar-kpi-card dolphin">
+                    <div class="ma-radar-kpi-header">
+                        <span>🐬 Dolphins</span>
+                        <span class="mono" style="font-size: 9.5px;">&ge; 500</span>
+                    </div>
+                    <div class="ma-radar-kpi-val" id="maRadarKpiDolphins">0</div>
+                    <div class="ma-radar-kpi-sub">~2.50€+ Netto</div>
+                </div>
+                <div class="ma-radar-kpi-card cross">
+                    <div class="ma-radar-kpi-header">
+                        <span>⚡ Cross</span>
+                        <span class="mono" style="font-size: 9.5px;">2+ Kanäle</span>
+                    </div>
+                    <div class="ma-radar-kpi-val" id="maRadarKpiCross">0</div>
+                    <div class="ma-radar-kpi-sub">Multi-Streamer</div>
+                </div>
+                <div class="ma-radar-kpi-card vip" id="maCardKpiVip" style="cursor: pointer;" title="Nur VIP-Spender filtern">
+                    <div class="ma-radar-kpi-header">
+                        <span>⭐ VIP</span>
+                        <span class="mono" style="font-size: 9.5px; color: #fde047;">Fokus</span>
+                    </div>
+                    <div class="ma-radar-kpi-val" id="maRadarKpiVip" style="color: #fbbf24;">0</div>
+                    <div class="ma-radar-kpi-sub">Watchlist</div>
+                </div>
+            </div>
+
+            <!-- Radar Sub-Navigation (Segmented Control) -->
+            <div class="ma-radar-subnav">
+                <button type="button" class="ma-radar-subnav-btn active" data-subtab="donors" id="maSubTabDonors">
+                    <span>🐋 Spender-Rangliste</span>
+                </button>
+                <button type="button" class="ma-radar-subnav-btn" data-subtab="alerts" id="maSubTabAlerts">
+                    <span>⚡ Whale-Alerts</span>
+                    <span class="ma-subnav-badge" id="maWhaleAlertCountBadge" style="display: none;">0</span>
+                </button>
+                <button type="button" class="ma-radar-subnav-btn" data-subtab="loyalty" id="maSubTabLoyalty">
+                    <span>🔀 Loyalität &amp; Wechsel</span>
+                </button>
+            </div>
+
+            <!-- Sub-View 1: Spender-Rangliste -->
+            <div class="ma-radar-subview" id="maSubViewDonors">
+                <!-- Radar Filter Controls Strip -->
+                <div class="ma-radar-filters">
+                    <div class="ma-radar-search-wrap">
+                        <svg class="search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        </svg>
+                        <input type="text" id="maRadarSearchInput" class="ma-radar-search" placeholder="Spender suchen..." />
+                        <button type="button" id="maRadarSearchClear" class="search-clear-btn" style="display: none;">&times;</button>
+                    </div>
+
+                    <div class="ma-radar-pills-row">
+                        <button type="button" class="ma-tier-pill active" data-tier="all">Alle</button>
+                        <button type="button" class="ma-tier-pill tier-whale" data-tier="whale">🐋 Whales</button>
+                        <button type="button" class="ma-tier-pill tier-shark" data-tier="shark">🦈 Sharks</button>
+                        <button type="button" class="ma-tier-pill tier-dolphin" data-tier="dolphin">🐬 Dolphins</button>
+                        <button type="button" class="ma-tier-pill tier-cross" id="maBtnToggleCrossOnly">⚡ Cross-Only</button>
+                        <button type="button" class="ma-tier-pill tier-vip" id="maBtnToggleVipOnly">⭐ VIP-Only</button>
+                    </div>
+                </div>
+
+                <!-- Donors List Container -->
+                <div id="maRadarDonorsContainer" class="ma-radar-list">
+                    <div class="ma-empty-state">
+                        <div class="ma-empty-icon">⏳</div>
+                        <div>Lade Spender-Radar...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sub-View 2: Live Whale-Alerts Feed -->
+            <div class="ma-radar-subview" id="maSubViewAlerts" style="display: none;">
+                <div class="ma-alerts-filters">
+                    <div class="ma-alerts-threshold-pills">
+                        <button type="button" class="ma-alert-pill" data-min="500">&ge; 500 Coins</button>
+                        <button type="button" class="ma-alert-pill active" data-min="1000">&ge; 1.000 Coins</button>
+                        <button type="button" class="ma-alert-pill" data-min="2500">&ge; 2.500 (Shark)</button>
+                        <button type="button" class="ma-alert-pill" data-min="10000">&ge; 10.000 (Whale)</button>
+                    </div>
+                    <button type="button" class="ma-btn ma-btn-secondary" id="maBtnRefreshWhaleAlerts" style="font-size: 11px; padding: 4px 8px; flex-shrink: 0;">
+                        ↻ Sync
+                    </button>
+                </div>
+
+                <div id="maWhaleAlertsContainer" class="ma-radar-list">
+                    <div class="ma-empty-state">
+                        <div class="ma-empty-icon">⏳</div>
+                        <div>Lade Live-Großspenden...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sub-View 3: Loyalität & Wechsel -->
+            <div class="ma-radar-subview" id="maSubViewLoyalty" style="display: none;">
+                <div class="ma-loyalty-header-bar">
+                    <div class="ma-loyalty-days-pills">
+                        <span class="mono muted" style="font-size: 10.5px; align-self: center; margin-right: 4px;">Zeitraum:</span>
+                        <button type="button" class="ma-loyalty-pill" data-days="3">3 Tage</button>
+                        <button type="button" class="ma-loyalty-pill" data-days="7">7 Tage</button>
+                        <button type="button" class="ma-loyalty-pill active" data-days="14">14 Tage</button>
+                        <button type="button" class="ma-loyalty-pill" data-days="30">30 Tage</button>
+                    </div>
+                    <button type="button" class="ma-btn ma-btn-secondary" id="maBtnRefreshLoyalty" style="font-size: 11px; padding: 4px 8px; flex-shrink: 0;">
+                        ↻ Sync
+                    </button>
+                </div>
+
+                <!-- Frontenwechsler Section -->
+                <div class="ma-loyalty-section">
+                    <div class="ma-loyalty-title-row">
+                        <span class="ma-loyalty-title">🔀 Frontenwechsler (Migrationen)</span>
+                        <span class="ma-loyalty-badge" id="maFrontenwechslerBadge">0 erkannt</span>
+                    </div>
+                    <div class="ma-loyalty-subtext">Großspender, die ihren Schwerpunkt auf einen neuen Streamer verlagert haben.</div>
+                    <div id="maFrontenwechslerContainer" class="ma-radar-list" style="margin-top: 8px;">
+                        <div class="ma-empty-state">
+                            <div class="ma-empty-icon">⏳</div>
+                            <div>Analysiere Frontenwechsler...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Overlap Matrix Section -->
+                <div class="ma-loyalty-section" style="margin-top: 16px;">
+                    <div class="ma-loyalty-title-row">
+                        <span class="ma-loyalty-title">⚡ Streamer-Überschneidungen</span>
+                        <span class="ma-loyalty-badge" id="maOverlapPairsBadge">0 Paare</span>
+                    </div>
+                    <div class="ma-loyalty-subtext">Kanal-Paare mit geteilten Großspendern und Coin-Verteilung.</div>
+                    <div id="maOverlapMatrixContainer" class="ma-radar-list" style="margin-top: 8px;">
+                        <div class="ma-empty-state">
+                            <div class="ma-empty-icon">⏳</div>
+                            <div>Berechne Überschneidungs-Matrix...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </section>
+
+    <!-- ============================================================== -->
+    <!-- TAB 5: ADMIN PANEL                                            -->
+    <!-- ============================================================== -->
+    <section class="ma-tab-view" id="tab-admin">
+        <!-- Auth Gate for Non-Admins -->
+        <div id="maAdminAuthGate" class="ma-card" style="display: none; text-align: center; padding: 24px 16px;">
+            <div style="font-size: 34px; margin-bottom: 8px;">🔐</div>
+            <h3 style="font-size: 16px; margin-bottom: 6px;">Admin-Bereich</h3>
+            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px;" id="maAuthGateMsg">
+                Dieser Bereich erfordert Administrator-Rechte.
+            </p>
+            <div class="ma-form-group" style="max-width: 280px; margin: 0 auto 12px;">
+                <input type="text" id="maOtpCodeInput" class="ma-input" placeholder="6-stelliger Code" maxlength="16" style="text-align: center; font-size: 18px; letter-spacing: 2px;" />
+            </div>
+            <div style="display: flex; gap: 8px; justify-content: center; max-width: 280px; margin: 0 auto;">
+                <button type="button" class="ma-btn ma-btn-primary" id="maBtnSubmitOtp" style="flex: 1;">Anmelden</button>
+                <button type="button" class="ma-btn ma-btn-secondary" id="maBtnRequestOtp" style="flex: 1;">Code anfordern</button>
+            </div>
+        </div>
+
+        <!-- Admin Content (Visible when admin authenticated) -->
+        <div id="maAdminContent">
+            <!-- Admin Profile Banner -->
+            <div class="ma-admin-hero">
+                <div class="ma-admin-user-info">
+                    <div class="ma-admin-badge-icon">👑</div>
+                    <div>
+                        <div class="ma-admin-name" id="maAdminUserLabel">Admin</div>
+                        <div class="ma-admin-role">Vollzugriff · TokTracker Control</div>
+                    </div>
+                </div>
+                <button type="button" class="ma-btn-icon-danger" id="maBtnAdminLogout" title="Abmelden">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                </button>
+            </div>
+
+            <!-- Quick Action Grid -->
+            <div class="section-head" style="margin-top: 14px;">
+                <div class="section-title">⚡ Schnellaktionen</div>
+            </div>
+            <div class="ma-admin-action-grid">
+                <button type="button" class="ma-action-btn" id="maBtnOpenAddStreamer">
+                    <span class="action-icon">➕</span>
+                    <span class="action-text">Streamer anlegen</span>
+                </button>
+                <button type="button" class="ma-action-btn" id="maBtnOpenAddGift">
+                    <span class="action-icon">🎁</span>
+                    <span class="action-text">Gift buchen</span>
+                </button>
+                <button type="button" class="ma-action-btn" id="maBtnOpenSettings">
+                    <span class="action-icon">⚙️</span>
+                    <span class="action-text">Kurse &amp; Settings</span>
+                </button>
+                <button type="button" class="ma-action-btn" id="maBtnOpenWhitelist">
+                    <span class="action-icon">👥</span>
+                    <span class="action-text">Bot-Whitelist</span>
+                </button>
+            </div>
+
+            <!-- Streamer Management List -->
+            <div class="section-head" style="margin-top: 18px;">
+                <div class="section-title">👥 Streamer-Steuerung &amp; Monitoring</div>
+            </div>
+            <div id="maAdminStreamersContainer">
+                <div class="ma-empty-state">
+                    <div class="ma-empty-icon">⏳</div>
+                    <div>Lade Streamer-Verwaltung...</div>
+                </div>
+            </div>
+
+            <!-- System Diagnostics & Health -->
+            <div class="section-head" style="margin-top: 18px; display: flex; justify-content: space-between; align-items: center;">
+                <div class="section-title">🩺 System-Status &amp; Diagnostics</div>
+                <button type="button" id="btnMaRefreshHealth" class="btn-sm" style="font-size: 10px; padding: 3px 8px; border-radius: 4px; border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--btn-text); cursor: pointer;">
+                    🔄 Aktualisieren
+                </button>
+            </div>
+
+            <!-- Service Status Summary Card -->
+            <div class="ma-card" id="maSystemDiagCard" style="font-size: 11px; line-height: 1.6; margin-bottom: 10px;">
+                <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 6px; margin-bottom: 6px;">
+                    <span style="color: var(--text-muted);">Datenbank-Engine:</span>
+                    <span id="maDiagDbEngine" class="mono">--</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 6px; margin-bottom: 6px;">
+                    <span style="color: var(--text-muted);">Aktive Worker:</span>
+                    <span id="maDiagActiveWorkers" class="mono">--</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 6px; margin-bottom: 6px;">
+                    <span style="color: var(--text-muted);">Telegram Bot:</span>
+                    <span id="maDiagBotStatus" class="mono">--</span>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                    <span style="color: var(--text-muted);">TikTok Session:</span>
+                    <span id="maDiagTiktokSession" class="mono">--</span>
+                </div>
+            </div>
+
+            <!-- Host Resource Gauges Card -->
+            <div class="ma-card" id="maHostHealthCard" style="margin-bottom: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <strong style="font-size: 12px; color: var(--text-strong);">🖥️ Server-Ressourcen (Host)</strong>
+                    <span id="maHealthStatusBadge" class="status-pill live" style="font-size: 9.5px; padding: 2px 6px;">OK</span>
+                </div>
+
+                <!-- Festplatte -->
+                <div class="ma-health-metric-row">
+                    <div class="ma-health-header">
+                        <span>💾 Festplatte</span>
+                        <span id="maHealthDiskPercent" class="mono" style="font-weight: 700; color: #10b981;">0%</span>
+                    </div>
+                    <div class="ma-health-track">
+                        <div id="maHealthDiskBar" class="ma-health-fill" style="width: 0%; background: #10b981;"></div>
+                    </div>
+                    <div class="ma-health-subtext">
+                        <span>Belegt: <span id="maHealthDiskUsed" class="text-main">--</span></span>
+                        <span>Frei: <span id="maHealthDiskFree" class="text-main">--</span> / <span id="maHealthDiskTotal">--</span></span>
+                    </div>
+                </div>
+
+                <!-- RAM -->
+                <div class="ma-health-metric-row" style="margin-top: 10px;">
+                    <div class="ma-health-header">
+                        <span>🧠 RAM</span>
+                        <span id="maHealthRamPercent" class="mono" style="font-weight: 700; color: #3b82f6;">0%</span>
+                    </div>
+                    <div class="ma-health-track">
+                        <div id="maHealthRamBar" class="ma-health-fill" style="width: 0%; background: #3b82f6;"></div>
+                    </div>
+                    <div class="ma-health-subtext">
+                        <span>Belegt: <span id="maHealthRamUsed" class="text-main">--</span></span>
+                        <span>Frei: <span id="maHealthRamFree" class="text-main">--</span> / <span id="maHealthRamTotal">--</span></span>
+                    </div>
+                </div>
+
+                <!-- CPU -->
+                <div class="ma-health-metric-row" style="margin-top: 10px;">
+                    <div class="ma-health-header">
+                        <span>⚡ CPU &amp; Load</span>
+                        <span id="maHealthCpuPercent" class="mono" style="font-weight: 700; color: #8b5cf6;">0%</span>
+                    </div>
+                    <div class="ma-health-track">
+                        <div id="maHealthCpuBar" class="ma-health-fill" style="width: 0%; background: #8b5cf6;"></div>
+                    </div>
+                    <div class="ma-health-subtext">
+                        <span>Load: <span id="maHealthCpuLoad" class="text-main">--</span></span>
+                        <span><span id="maHealthCpuCores">--</span> Kerne</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Docker Containers & Storage Card -->
+            <div class="ma-card" id="maDockerHealthCard" style="margin-bottom: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <strong style="font-size: 12px; color: var(--text-strong);">🐳 Docker Container &amp; Speicher</strong>
+                    <span id="maDockerConnBadge" class="status-pill" style="font-size: 9.5px; padding: 2px 6px;">Lade...</span>
+                </div>
+
+                <!-- Container List -->
+                <div id="maContainersList">
+                    <div class="muted" style="font-size: 11px;">Lade Container...</div>
+                </div>
+
+                <!-- Volumes & DB Footer in Mini-App -->
+                <div style="border-top: 1px solid var(--border-color); margin-top: 10px; padding-top: 8px;">
+                    <div style="display: flex; justify-content: space-between; font-size: 10.5px; color: var(--text-muted); margin-bottom: 4px;">
+                        <span>📦 Docker Volumes:</span>
+                        <span id="maVolumesSummary" class="mono text-main">--</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 10.5px; color: var(--text-muted);">
+                        <span>🗄️ Datenbank-Größe:</span>
+                        <span id="maDbSummary" class="mono text-main">--</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
 </div>
 
-<!-- Bottom Navigation Bar (Telegram Native Mobile Style) -->
+<!-- ============================================================== -->
+<!-- BOTTOM NAVIGATION BAR (5 TABS)                                 -->
+<!-- ============================================================== -->
 <nav class="ma-bottom-nav">
-    <button type="button" class="nav-tab-btn active" data-tab="tab-matches">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path d="M14.5 17.5L3 6V3h3l11.5 11.5"/>
-            <path d="M13 19l6-6"/>
-            <path d="M16 16l4 4"/>
-            <path d="M19 21l2-2"/>
-            <path d="M9.5 6.5L18 15"/>
-        </svg>
-        <span>Matches</span>
-    </button>
-
-    <button type="button" class="nav-tab-btn" data-tab="tab-streamers">
+    <button type="button" class="nav-tab-btn active" data-tab="tab-streamers">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
             <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
             <circle cx="9" cy="7" r="4"/>
@@ -148,6 +657,15 @@
             <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
         </svg>
         <span>Streamer</span>
+    </button>
+
+    <button type="button" class="nav-tab-btn" data-tab="tab-analytics">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <line x1="18" y1="20" x2="18" y2="10"/>
+            <line x1="12" y1="20" x2="12" y2="4"/>
+            <line x1="6" y1="20" x2="6" y2="14"/>
+        </svg>
+        <span>Analytics</span>
     </button>
 
     <button type="button" class="nav-tab-btn" data-tab="tab-gifts">
@@ -160,8 +678,187 @@
         </svg>
         <span>Gifts</span>
     </button>
+
+    <button type="button" class="nav-tab-btn" data-tab="tab-radar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 6a6 6 0 1 0 6 6"/>
+            <path d="M12 10a2 2 0 1 0 2 2"/>
+            <line x1="12" y1="12" x2="19" y2="5"/>
+        </svg>
+        <span>Radar</span>
+    </button>
+
+    <button type="button" class="nav-tab-btn" data-tab="tab-admin">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+        <span>Admin</span>
+    </button>
 </nav>
 
-<script src="/static/miniapp.js?v=1.0.0"></script>
+<!-- ============================================================== -->
+<!-- BOTTOM SHEET MODALS                                            -->
+<!-- ============================================================== -->
+
+<!-- Modal 1: Streamer hinzufügen -->
+<div class="ma-modal-backdrop" id="modalAddStreamer">
+    <div class="ma-modal-sheet">
+        <div class="ma-sheet-header">
+            <div class="ma-sheet-title">➕ Streamer hinzufügen</div>
+            <button type="button" class="ma-sheet-close" data-close="modalAddStreamer">&times;</button>
+        </div>
+        <div class="ma-sheet-body">
+            <div class="ma-form-group">
+                <label>TikTok @Username</label>
+                <input type="text" id="inputAddStreamerUsername" class="ma-input" placeholder="z. B. montana.black" required />
+            </div>
+            <div class="ma-form-group">
+                <label>Anzeigename (optional)</label>
+                <input type="text" id="inputAddStreamerDisplayName" class="ma-input" placeholder="z. B. Monte" />
+            </div>
+            <div class="ma-form-check">
+                <input type="checkbox" id="checkAddStreamerAutoTrack" checked />
+                <label for="checkAddStreamerAutoTrack">Sofort überwachen (Tracking starten)</label>
+            </div>
+            <div class="ma-form-check">
+                <input type="checkbox" id="checkAddStreamerAutoReconnect" checked />
+                <label for="checkAddStreamerAutoReconnect">Auto-Monitor aktiv (automatisch reconnecten)</label>
+            </div>
+            <button type="button" class="ma-btn ma-btn-primary full-width" id="btnSubmitAddStreamer" style="margin-top: 14px;">Streamer anlegen</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal 2: Manuelles Geschenk buchen -->
+<div class="ma-modal-backdrop" id="modalAddGift">
+    <div class="ma-modal-sheet">
+        <div class="ma-sheet-header">
+            <div class="ma-sheet-title">🎁 Manuelles Geschenk buchen</div>
+            <button type="button" class="ma-sheet-close" data-close="modalAddGift">&times;</button>
+        </div>
+        <div class="ma-sheet-body">
+            <div class="ma-form-group">
+                <label>Ziel-Streamer</label>
+                <select id="selectAddGiftStreamer" class="ma-input"></select>
+            </div>
+            <div class="ma-form-row">
+                <div class="ma-form-group" style="flex: 2;">
+                    <label>Geschenk-Name</label>
+                    <input type="text" id="inputAddGiftName" class="ma-input" value="Rose" />
+                </div>
+                <div class="ma-form-group" style="flex: 1;">
+                    <label>Coins/Stk.</label>
+                    <input type="number" id="inputAddGiftCoins" class="ma-input" value="1" min="1" />
+                </div>
+                <div class="ma-form-group" style="flex: 1;">
+                    <label>Anzahl</label>
+                    <input type="number" id="inputAddGiftCount" class="ma-input" value="1" min="1" />
+                </div>
+            </div>
+            <div class="ma-form-group">
+                <label>Spender Username</label>
+                <input type="text" id="inputAddGiftSender" class="ma-input" value="live_viewer" />
+            </div>
+            <button type="button" class="ma-btn ma-btn-primary full-width" id="btnSubmitAddGift" style="margin-top: 14px;">Geschenk buchen</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal 3: Kurse & Settings -->
+<div class="ma-modal-backdrop" id="modalSettings">
+    <div class="ma-modal-sheet">
+        <div class="ma-sheet-header">
+            <div class="ma-sheet-title">⚙️ Kurse &amp; Berechnungen</div>
+            <button type="button" class="ma-sheet-close" data-close="modalSettings">&times;</button>
+        </div>
+        <div class="ma-sheet-body">
+            <div class="ma-form-row">
+                <div class="ma-form-group" style="flex: 1;">
+                    <label>USD pro Diamond (Netto)</label>
+                    <input type="number" step="0.0001" id="inputSettingsUsdDiamond" class="ma-input" />
+                </div>
+                <div class="ma-form-group" style="flex: 1;">
+                    <label>Gross USD pro Coin</label>
+                    <input type="number" step="0.0001" id="inputSettingsGrossCoin" class="ma-input" />
+                </div>
+            </div>
+            <div class="ma-form-row">
+                <div class="ma-form-group" style="flex: 1;">
+                    <label>USD zu EUR Kurs</label>
+                    <input type="number" step="0.001" id="inputSettingsUsdToEur" class="ma-input" />
+                </div>
+                <div class="ma-form-group" style="flex: 1;">
+                    <label>Hauptwährung</label>
+                    <select id="selectSettingsCurrency" class="ma-input">
+                        <option value="EUR">EUR (€)</option>
+                        <option value="USD">USD ($)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="ma-form-group">
+                <label>Telegram Zugriffsmodus</label>
+                <select id="selectSettingsTgMode" class="ma-input">
+                    <option value="whitelist">Whitelist (nur freigeschaltete Nutzer)</option>
+                    <option value="public">Public (alle Nutzer zugelassen)</option>
+                </select>
+            </div>
+            <button type="button" class="ma-btn ma-btn-primary full-width" id="btnSubmitSettings" style="margin-top: 14px;">Einstellungen speichern</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal 4: Telegram Whitelist -->
+<div class="ma-modal-backdrop" id="modalWhitelist">
+    <div class="ma-modal-sheet">
+        <div class="ma-sheet-header">
+            <div class="ma-sheet-title">👥 Telegram Whitelist &amp; Rollen</div>
+            <button type="button" class="ma-sheet-close" data-close="modalWhitelist">&times;</button>
+        </div>
+        <div class="ma-sheet-body">
+            <div class="ma-card" style="padding: 10px; margin-bottom: 12px;">
+                <div style="font-size: 11px; font-weight: 700; margin-bottom: 6px;">Nutzer manuell freischalten</div>
+                <div class="ma-form-row">
+                    <input type="text" id="inputAddTgUserIdent" class="ma-input" placeholder="@username oder ID" style="flex: 2;" />
+                    <select id="selectAddTgUserRole" class="ma-input" style="flex: 1;">
+                        <option value="user">User</option>
+                        <option value="admin">Admin</option>
+                    </select>
+                    <button type="button" class="ma-btn ma-btn-primary" id="btnSubmitAddTgUser">Hinzufügen</button>
+                </div>
+            </div>
+            <div id="maWhitelistUsersContainer" style="max-height: 280px; overflow-y: auto;">
+                <div class="ma-empty-state">Lade Whitelist...</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal 5: Spender-Dossier & CRM Sheet -->
+<div class="ma-modal-backdrop" id="modalDonorDossier">
+    <div class="ma-modal-sheet ma-dossier-sheet">
+        <div class="ma-sheet-header">
+            <div style="display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;">
+                <div class="ma-sheet-title" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    Dossier: <span id="maDossierUsername">@username</span>
+                </div>
+                <span id="maDossierTierBadge"></span>
+            </div>
+            <button type="button" class="ma-sheet-close" data-close="modalDonorDossier">&times;</button>
+        </div>
+        <div class="ma-sheet-body" id="maDossierBody" style="padding: 14px 16px; max-height: 80vh; overflow-y: auto;">
+            <div class="ma-empty-state">
+                <div class="ma-empty-icon">⏳</div>
+                <div>Lade Spender-Dossier...</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Toast Container -->
+<div class="ma-toast-container" id="maToastContainer"></div>
+
+<script src="/static/miniapp.js?v=2.5.1"></script>
 </body>
 </html>

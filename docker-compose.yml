@@ -28,6 +28,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    group_add:
+      - "${DOCKER_GID:-988}"
     networks:
       - toktracker_net
 

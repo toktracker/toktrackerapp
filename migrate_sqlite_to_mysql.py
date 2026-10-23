@@ -435,7 +435,73 @@ def migrate(
                     ),
                 )
                 battle_count += 1
-        print(f"[7/7] TikTok Battles übertragen: {battle_count}")
+        print(f"[7/8] TikTok Battles übertragen: {battle_count}")
+
+        # ----------------------------------------------------------------------
+        # 7. Chat-Nachrichten
+        # ----------------------------------------------------------------------
+        has_chat_table = src.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='chat_messages'"
+        ).fetchone()[0] > 0
+        chat_count = 0
+        if has_chat_table:
+            chat_rows = src.execute("SELECT * FROM chat_messages ORDER BY id ASC").fetchall()
+            for r in chat_rows:
+                d = dict(r)
+                dst.execute(
+                    """
+                    INSERT IGNORE INTO chat_messages (
+                        id, streamer_id, session_id, user_id,
+                        username, nickname, avatar_url, comment,
+                        is_whale, whale_tier, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        d["id"],
+                        d["streamer_id"],
+                        d.get("session_id"),
+                        d.get("user_id") or "",
+                        d["username"],
+                        d.get("nickname") or d["username"],
+                        d.get("avatar_url") or "",
+                        d["comment"],
+                        int(d.get("is_whale") or 0),
+                        d.get("whale_tier") or "",
+                        d["created_at"],
+                    ),
+                )
+                chat_count += 1
+        print(f"[8/9] Chat-Nachrichten übertragen: {chat_count}")
+
+        # ----------------------------------------------------------------------
+        # 8. Donor CRM (VIP Watchlist, Tags, Notes)
+        # ----------------------------------------------------------------------
+        has_crm_table = src.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='donor_crm'"
+        ).fetchone()[0] > 0
+        crm_count = 0
+        if has_crm_table:
+            crm_rows = src.execute("SELECT * FROM donor_crm ORDER BY id ASC").fetchall()
+            for r in crm_rows:
+                d = dict(r)
+                dst.execute(
+                    """
+                    INSERT IGNORE INTO donor_crm (
+                        id, username, is_vip, tags, notes, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        d["id"],
+                        d["username"],
+                        int(d.get("is_vip") or 0),
+                        d.get("tags") or "",
+                        d.get("notes") or "",
+                        d["created_at"],
+                        d["updated_at"],
+                    ),
+                )
+                crm_count += 1
+        print(f"[9/9] Spender-CRM (VIP/Notizen) übertragen: {crm_count}")
 
         # Fremdschlüssel-Prüfungen wieder aktivieren & Commit
         with raw_dst.cursor() as cur:
@@ -444,13 +510,16 @@ def migrate(
 
         print("\n" + "=" * 70)
         print(" [ERFOLG] Die Migration wurde vollständig und fehlerfrei abgeschlossen!")
-        print(f" - Settings:       {len(settings_rows)}")
-        print(f" - Streamer:       {len(streamer_rows)}")
-        print(f" - Sessions:       {len(session_rows)}")
-        print(f" - Gift-Events:    {len(gift_rows)}")
-        print(f" - Telegram-Users: {len(tg_rows)}")
-        print(f" - TikTok-Battles: {battle_count}")
+        print(f" - Settings:         {len(settings_rows)}")
+        print(f" - Streamer:         {len(streamer_rows)}")
+        print(f" - Sessions:         {len(session_rows)}")
+        print(f" - Gift-Events:      {len(gift_rows)}")
+        print(f" - Telegram-Users:   {len(tg_rows)}")
+        print(f" - TikTok-Battles:   {battle_count}")
+        print(f" - Chat-Nachrichten: {chat_count}")
+        print(f" - Spender-CRM:      {crm_count}")
         print("=" * 70)
+
     except Exception as exc:
         dst.rollback()
         raise exc

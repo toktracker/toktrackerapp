@@ -120,3 +120,19 @@ class SqliteImportRequest(BaseModel):
     file_path: Optional[str] = None
     tables: Optional[List[str]] = None
     mode: str = "merge"  # "merge" oder "clean"
+
+
+class MiniAppAuthRequest(BaseModel):
+    init_data: str = Field(..., description="Raw window.Telegram.WebApp.initData query string")
+
+
+class MiniAppVerifyCodeRequest(BaseModel):
+    code: str = Field(..., min_length=4, max_length=64, description="6-stelliger OTP-Code oder Admin-Passwort")
+    challenge_id: Optional[str] = Field(None, description="Optionale Challenge ID")
+
+
+class DonorCRMUpdateRequest(BaseModel):
+    is_vip: Optional[bool] = Field(None, description="VIP / Watchlist-Status")
+    tags: Optional[List[str]] = Field(None, description="Liste von Tags / Labels")
+    notes: Optional[str] = Field(None, description="Interne Admin-Notizen zum Spender")
+

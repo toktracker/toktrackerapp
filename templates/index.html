@@ -13,7 +13,7 @@
             } catch (e) {}
         })();
     </script>
-    <link rel="stylesheet" href="/static/style.css?v=2.5.1" />
+    <link rel="stylesheet" href="/static/style.css?v=2.5.2" />
     <script src="/static/chart.umd.min.js"></script>
 </head>
 <body>
@@ -38,8 +38,11 @@
             <span class="pill">Worker: <strong id="sysWorkerInfo">0 aktiv</strong></span>
             <span class="pill">Telegram-Bot: <strong id="sysTelegramInfo">{{ telegram_diag.state | upper }}</strong></span>
             <span class="pill">Bot-Zugriff: <strong id="sysTelegramMode">{{ (telegram_diag.access_mode or "whitelist") | upper }}</strong></span>
+            <a class="btn-link sm" href="/donor-radar" style="color: #38bdf8; font-weight: 700;">🐋 Spender-Radar</a>
+            <a class="btn-link sm" href="/site-analytics">📊 Web-Analysen</a>
             <a class="btn-link primary sm" href="/">Öffentliches User-Panel →</a>
             <a class="btn-link sm" href="/logout">Abmelden</a>
+
         </div>
     </div>
 </header>
@@ -151,15 +154,15 @@
                 <table>
                     <thead>
                         <tr>
-                            <th style="width:48px;">ID</th>
+                            <th style="width:48px;" class="hide-sm">ID</th>
                             <th>Streamer</th>
-                            <th>Worker / Live-Status</th>
-                            <th class="num-col">Zuschauer</th>
+                            <th class="hide-sm">Worker / Live-Status</th>
+                            <th class="num-col hide-md">Zuschauer</th>
                             <th class="num-col">Coins</th>
                             <th class="num-col">Netto (EUR)</th>
-                            <th class="num-col">Netto (USD)</th>
-                            <th class="num-col">Brutto (EUR)</th>
-                            <th>Top Gift / Top Spender</th>
+                            <th class="num-col hide-sm">Netto (USD)</th>
+                            <th class="num-col hide-md">Brutto (EUR)</th>
+                            <th class="hide-sm">Top Gift / Top Spender</th>
                             <th>Aktionen</th>
                         </tr>
                     </thead>
@@ -245,6 +248,10 @@
                         <option value="30d">Letzte 30 Tage</option>
                     </select>
                     <button type="button" id="btnRefreshAnalytics" class="primary">Aktualisieren</button>
+                    <label class="checkbox-inline mono muted" style="margin-left:6px; display:inline-flex; align-items:center; gap:5px; font-size:12px; cursor:pointer;" title="Alle 30 Sekunden automatisch im Hintergrund aktualisieren">
+                        <input type="checkbox" id="chkAnalyticsAutoRefresh"> Auto-Refresh (30s)
+                    </label>
+                    <span id="anLastUpdated" class="mono muted" style="font-size:11px; margin-left:8px;"></span>
                 </div>
             </div>
             <div id="anStreamerMetaBanner" class="mono muted" style="display:none; font-size:12px; margin-top:2px;">
@@ -257,7 +264,7 @@
             <div class="summary-box">
                 <div class="label">Netto Creator-Erlös</div>
                 <div class="val" id="anNetEur">0,00 €</div>
-                <div class="sub" id="anNetUsd">$0.00 USD (Brutto: <span id="anGrossEur">0,00 €</span>)</div>
+                <div class="sub"><span id="anNetUsd">$0.00 USD</span> (Brutto: <span id="anGrossEur">0,00 €</span>)</div>
             </div>
             <div class="summary-box">
                 <div class="label">Coins / Diamonds</div>
@@ -383,10 +390,10 @@
                             <tr>
                                 <th style="width:40px;">Rang</th>
                                 <th>Spender</th>
-                                <th class="num-col">Gifts</th>
+                                <th class="num-col hide-sm">Gifts</th>
                                 <th class="num-col">Coins</th>
                                 <th class="num-col">Netto EUR</th>
-                                <th class="num-col">Anteil</th>
+                                <th class="num-col hide-sm">Anteil</th>
                             </tr>
                         </thead>
                         <tbody id="anGiftersTableBody">
@@ -408,11 +415,11 @@
                         <thead>
                             <tr>
                                 <th>Geschenk</th>
-                                <th class="num-col">Wert</th>
-                                <th class="num-col">Anzahl</th>
+                                <th class="num-col hide-sm">Wert</th>
+                                <th class="num-col hide-sm">Anzahl</th>
                                 <th class="num-col">Coins</th>
                                 <th class="num-col">Netto EUR</th>
-                                <th class="num-col">Anteil</th>
+                                <th class="num-col hide-sm">Anteil</th>
                             </tr>
                         </thead>
                         <tbody id="anGiftsTableBody">
@@ -436,15 +443,15 @@
                 <table>
                     <thead>
                         <tr>
-                            <th style="width:50px;">ID</th>
+                            <th style="width:50px;" class="hide-sm">ID</th>
                             <th>Streamer</th>
                             <th>Startzeitpunkt</th>
                             <th class="num-col">Dauer</th>
-                            <th class="num-col">Peak Viewers</th>
-                            <th>Status</th>
+                            <th class="num-col hide-sm">Peak Viewers</th>
+                            <th class="hide-sm">Status</th>
                             <th class="num-col">Coins</th>
                             <th class="num-col">Netto EUR</th>
-                            <th class="num-col">Coins / Stunde</th>
+                            <th class="num-col hide-md">Coins / Stunde</th>
                         </tr>
                     </thead>
                     <tbody id="anSessionsTableBody">
@@ -583,11 +590,11 @@
                         <tr>
                             <th>Gegner / TikTok-Profil</th>
                             <th class="num-col">Matches</th>
-                            <th class="num-col">Bilanz (S-N-U)</th>
+                            <th class="num-col hide-sm">Bilanz (S-N-U)</th>
                             <th class="num-col">Winrate</th>
-                            <th class="num-col">Ø Eigener Score</th>
-                            <th class="num-col">Ø Gegner Score</th>
-                            <th class="num-col">Gesamt Coins</th>
+                            <th class="num-col hide-md">Ø Eigener Score</th>
+                            <th class="num-col hide-md">Ø Gegner Score</th>
+                            <th class="num-col hide-sm">Gesamt Coins</th>
                             <th class="num-col">Netto EUR</th>
                         </tr>
                     </thead>
@@ -674,11 +681,11 @@
                             <th>Zeitpunkt</th>
                             <th>Streamer</th>
                             <th>Absender</th>
-                            <th>Geschenk</th>
+                            <th class="hide-sm">Geschenk</th>
                             <th class="num-col">Coins</th>
                             <th class="num-col">Netto (EUR)</th>
-                            <th class="num-col">Netto (USD)</th>
-                            <th>Quelle</th>
+                            <th class="num-col hide-sm">Netto (USD)</th>
+                            <th class="hide-sm">Quelle</th>
                         </tr>
                     </thead>
                     <tbody id="giftLogBody">
@@ -740,12 +747,12 @@
                 <table>
                     <thead>
                         <tr>
-                            <th>Telegram User-ID</th>
+                            <th class="hide-sm">Telegram User-ID</th>
                             <th>@Username / Name</th>
                             <th>Rolle</th>
                             <th>Status</th>
-                            <th>Notiz / Herkunft</th>
-                            <th>Zuletzt aktiv</th>
+                            <th class="hide-sm">Notiz / Herkunft</th>
+                            <th class="hide-md">Zuletzt aktiv</th>
                             <th>Aktionen</th>
                         </tr>
                     </thead>
@@ -761,6 +768,119 @@
     <!-- TAB 4: SYSTEM, KURSE & SERVICE-LOGS                       -->
     <!-- ========================================================= -->
     <section class="tab-panel" id="tab-system">
+        <!-- DOCKER CONTAINER & SYSTEM STORAGE MONITORING -->
+        <div class="box" id="boxSystemHealth" style="margin-bottom: 20px;">
+            <div class="box-header">
+                <div>
+                    <h2>🖥️ Server-Ressourcen &amp; Docker Container Überwachung</h2>
+                    <div class="section-hint">Echtzeit-Überwachung von Festplattenspeicher, RAM, CPU-Last sowie Speichernutzung aller Docker-Container &amp; Volumes.</div>
+                </div>
+                <div class="inline-form" style="gap: 10px;">
+                    <span id="healthDockerBadge" class="status-tag">Docker: Lade...</span>
+                    <span id="healthLastUpdated" class="mono muted" style="font-size: 11px;">--:--:--</span>
+                    <button type="button" id="btnRefreshHealth" class="sm primary">🔄 Aktualisieren</button>
+                </div>
+            </div>
+
+            <!-- Host Resource Gauges (3 Spalten) -->
+            <div class="health-gauges-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; padding: 14px 16px; border-bottom: 1px solid var(--border-color);">
+                <!-- Disk Gauge -->
+                <div class="health-card" style="background: var(--bg-surface); border: 1px solid var(--border-color); padding: 12px; border-radius: 4px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-weight: 600; font-size: 13px;">💾 Festplatte (Host)</span>
+                        <span id="gaugeDiskPercent" class="mono" style="font-weight: bold; font-size: 13px;">0%</span>
+                    </div>
+                    <div class="health-progress-track" style="height: 10px; background: var(--bg-subtle); border-radius: 5px; overflow: hidden; margin-bottom: 8px; border: 1px solid var(--border-subtle);">
+                        <div id="gaugeDiskBar" style="width: 0%; height: 100%; background: #10b981; transition: width 0.4s ease, background 0.4s ease;"></div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 11px;" class="mono muted">
+                        <span>Belegt: <span id="gaugeDiskUsed" class="text-main">--</span></span>
+                        <span>Frei: <span id="gaugeDiskFree" class="text-main">--</span></span>
+                        <span>Gesamt: <span id="gaugeDiskTotal">--</span></span>
+                    </div>
+                </div>
+
+                <!-- RAM Gauge -->
+                <div class="health-card" style="background: var(--bg-surface); border: 1px solid var(--border-color); padding: 12px; border-radius: 4px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-weight: 600; font-size: 13px;">🧠 Arbeitsspeicher (RAM)</span>
+                        <span id="gaugeRamPercent" class="mono" style="font-weight: bold; font-size: 13px;">0%</span>
+                    </div>
+                    <div class="health-progress-track" style="height: 10px; background: var(--bg-subtle); border-radius: 5px; overflow: hidden; margin-bottom: 8px; border: 1px solid var(--border-subtle);">
+                        <div id="gaugeRamBar" style="width: 0%; height: 100%; background: #3b82f6; transition: width 0.4s ease;"></div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 11px;" class="mono muted">
+                        <span>Belegt: <span id="gaugeRamUsed" class="text-main">--</span></span>
+                        <span>Frei: <span id="gaugeRamFree" class="text-main">--</span></span>
+                        <span>Gesamt: <span id="gaugeRamTotal">--</span></span>
+                    </div>
+                </div>
+
+                <!-- CPU / Load Gauge -->
+                <div class="health-card" style="background: var(--bg-surface); border: 1px solid var(--border-color); padding: 12px; border-radius: 4px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-weight: 600; font-size: 13px;">⚡ CPU &amp; System-Load</span>
+                        <span id="gaugeCpuPercent" class="mono" style="font-weight: bold; font-size: 13px;">0%</span>
+                    </div>
+                    <div class="health-progress-track" style="height: 10px; background: var(--bg-subtle); border-radius: 5px; overflow: hidden; margin-bottom: 8px; border: 1px solid var(--border-subtle);">
+                        <div id="gaugeCpuBar" style="width: 0%; height: 100%; background: #8b5cf6; transition: width 0.4s ease;"></div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 11px;" class="mono muted">
+                        <span>Load (1m/5m/15m): <span id="gaugeCpuLoad" class="text-main">--</span></span>
+                        <span>Kerne: <span id="gaugeCpuCores">--</span></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Docker Containers & Storage Details -->
+            <div style="padding: 14px 16px;">
+                <h3 style="font-size: 13px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px;">
+                    <span>🐳 Docker Container Auslastung &amp; Beschreibbarer Speicher</span>
+                    <span id="cntContainerCount" class="mono muted" style="font-size: 11px; font-weight: normal;">(0 Container)</span>
+                </h3>
+                
+                <div class="table-responsive" style="margin-bottom: 16px; overflow-x: auto;">
+                    <table style="width: 100%; font-size: 12px;">
+                        <thead>
+                            <tr>
+                                <th>Container</th>
+                                <th>Status</th>
+                                <th>CPU %</th>
+                                <th>RAM (Nutzung / Limit)</th>
+                                <th>RAM-Balken</th>
+                                <th>Writable Layer (Disk)</th>
+                                <th>Image &amp; ID</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tblContainersBody">
+                            <tr><td colspan="7" class="muted">Lade Docker Container-Daten...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Volumes & DB Storage Overview (2-Spaltig) -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px;">
+                    <!-- Volumes Box -->
+                    <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 4px; padding: 12px;">
+                        <h4 style="font-size: 12px; margin-bottom: 8px; color: var(--text-strong);">📦 Docker Volumes</h4>
+                        <div id="listVolumesContainer" style="display: flex; flex-direction: column; gap: 6px; font-size: 11px;">
+                            <span class="muted">Keine Volumes gefunden.</span>
+                        </div>
+                    </div>
+
+                    <!-- DB Storage Box -->
+                    <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 4px; padding: 12px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <h4 style="font-size: 12px; margin: 0; color: var(--text-strong);">🗄️ Datenbank-Tabellenspeicher</h4>
+                            <span id="dbTotalSizeBadge" class="mono muted" style="font-size: 11px;">0 MB</span>
+                        </div>
+                        <div id="listDbTablesContainer" style="display: flex; flex-direction: column; gap: 6px; font-size: 11px;">
+                            <span class="muted">Lade Tabellendaten...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
         <div class="grid-2">
             <div class="box">
                 <div class="box-header">
@@ -918,10 +1038,11 @@
 <footer class="app-footer">
     <div>toktracker · LIVE EARNINGS · ANALYTICS</div>
     <div>
-        <a href="/">Öffentliches User-Panel</a> · <a href="/docs" target="_blank">API Dokumentation</a> · <a href="/logout">Abmelden</a>
+        <a href="/donor-radar">🐋 Spender-Radar &amp; Chatlogs</a> · <a href="/site-analytics">📊 Web- &amp; Bot-Analysen</a> · <a href="/">Öffentliches User-Panel</a> · <a href="/docs" target="_blank">API Dokumentation</a> · <a href="/logout">Abmelden</a>
     </div>
+
 </footer>
 
-<script src="/static/dashboard.js?v=2.8.0"></script>
+<script src="/static/dashboard.js?v=2.9.0"></script>
 </body>
 </html>

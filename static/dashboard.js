@@ -15,6 +15,19 @@ let chartTimeOfDayInstance = null;
 let chartGiftDistInstance = null;
 let chartTopGiftersInstance = null;
 
+let analyticsLoadedOnce = false;
+let lastAnalyticsFingerprint = null;
+let analyticsAutoRefreshTimer = null;
+
+function updateAnalyticsTimestamp() {
+    const el = document.getElementById("anLastUpdated");
+    if (el) {
+        const d = new Date();
+        const timeStr = d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        el.textContent = `Stand: ${timeStr}`;
+    }
+}
+
 function fmtEUR(v) {
     return new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR" }).format(v || 0);
 }
@@ -72,6 +85,11 @@ function applyTheme(theme) {
         btn.textContent = normalized === "dark" ? "Theme: DARK" : "Theme: LIGHT";
     }
     if (cachedAnalyticsData) {
+        if (chartTimelineInstance) { chartTimelineInstance.destroy(); chartTimelineInstance = null; }
+        if (chartCompareInstance) { chartCompareInstance.destroy(); chartCompareInstance = null; }
+        if (chartTimeOfDayInstance) { chartTimeOfDayInstance.destroy(); chartTimeOfDayInstance = null; }
+        if (chartGiftDistInstance) { chartGiftDistInstance.destroy(); chartGiftDistInstance = null; }
+        if (chartTopGiftersInstance) { chartTopGiftersInstance.destroy(); chartTopGiftersInstance = null; }
         renderTimelineChart(cachedAnalyticsData);
         renderCompareChart(cachedAnalyticsData);
         renderTimeOfDayChart(cachedAnalyticsData);
@@ -88,13 +106,20 @@ function switchTab(tabId) {
         panel.classList.toggle("active", panel.id === tabId);
     });
     if (tabId === "tab-analytics") {
-        setTimeout(() => {
-            loadAnalytics();
-        }, 50);
+        if (!analyticsLoadedOnce) {
+            analyticsLoadedOnce = true;
+            setTimeout(() => {
+                loadAnalytics();
+            }, 50);
+        }
     } else if (tabId === "tab-battles") {
         setTimeout(() => {
             loadBattles();
             loadBattleStats();
+        }, 50);
+    } else if (tabId === "tab-system") {
+        setTimeout(() => {
+            fetchSystemHealth();
         }, 50);
     }
 }
@@ -141,6 +166,10 @@ async function loadOverview() {
             cachedWorkers = data.system.workers || [];
             cachedTgLogs = tg ? tg.logs || [] : [];
             renderServiceLogs();
+
+            if (data.system.system_health) {
+                renderSystemHealth(data.system.system_health);
+            }
         }
 
         if (data.settings) {
@@ -217,12 +246,12 @@ function renderStreamerTable() {
 
             return `
                 <tr>
-                    <td class="mono muted">#${s.id}</td>
+                    <td class="mono muted hide-sm">#${s.id}</td>
                     <td>
                         <strong><a href="#" onclick="showStreamerDetail(${s.id}); return false;">${s.display_name || s.username}</a></strong>
                         <div class="mono muted">@${s.username}${s.room_id ? ` · Room ${s.room_id}` : ""}</div>
                     </td>
-                    <td>
+                    <td class="hide-sm">
                         <div style="display:flex; gap:4px; flex-wrap:wrap; align-items:center;">
                             <span class="status-tag ${tagClass}">${state.toUpperCase()}</span>
                             ${autoBadge}
@@ -230,7 +259,7 @@ function renderStreamerTable() {
                         <div class="mono muted" style="margin-top:3px;">${s.monitor_status || ""}</div>
                         ${s.last_error ? `<div class="mono err-text">${s.last_error}</div>` : ""}
                     </td>
-                    <td class="num-col">
+                    <td class="num-col hide-md">
                         <strong>${fmtNum(s.current_viewers || 0)}</strong>
                         <div class="muted">${fmtNum(s.follower_count || 0)} Follower</div>
                     </td>
@@ -239,9 +268,9 @@ function renderStreamerTable() {
                         <div class="muted">${fmtNum(s.total_gifts_sent)} Gifts / ${s.unique_gifters} Gifter</div>
                     </td>
                     <td class="num-col"><strong>${fmtEUR(s.eur_net)}</strong></td>
-                    <td class="num-col">${fmtUSD(s.usd_net)}</td>
-                    <td class="num-col">${fmtEUR(s.eur_gross)}</td>
-                    <td class="mono">
+                    <td class="num-col hide-sm">${fmtUSD(s.usd_net)}</td>
+                    <td class="num-col hide-md">${fmtEUR(s.eur_gross)}</td>
+                    <td class="mono hide-sm">
                         <div>Gift: ${topGift}</div>
                         <div class="muted">Spender: ${topGifter}</div>
                     </td>
@@ -251,7 +280,7 @@ function renderStreamerTable() {
                             <button type="button" class="sm" onclick="toggleWorker(${s.id})">${trackBtnText}</button>
                             <button type="button" class="sm" onclick="showStreamerDetail(${s.id})">Details</button>
                             <button type="button" class="sm" onclick="refreshStreamer(${s.id})" title="TikTok Profil aktualisieren">Sync</button>
-                            <a class="btn-link sm mono" href="/api/v1/streamers/${encodeURIComponent(s.username)}/report?hours=24" target="_blank">JSON</a>
+                            <a class="btn-link sm mono hide-sm" href="/api/v1/streamers/${encodeURIComponent(s.username)}/report?hours=24" target="_blank">JSON</a>
                             <button type="button" class="sm danger" onclick="deleteStreamer(${s.id}, '${s.username}')">X</button>
                         </div>
                     </td>
@@ -289,14 +318,14 @@ function renderGiftLog() {
                     <td class="mono"><strong>@${g.streamer_username}</strong></td>
                     <td>
                         ${g.sender_nickname || g.sender_username}
-                        <span class="mono muted">(@${g.sender_username})</span>
+                        <span class="mono muted hide-sm">(@${g.sender_username})</span>
                         ${g.is_super_fan ? `<span class="status-tag polling">SUPERFAN</span>` : ""}
                     </td>
-                    <td><strong>${g.repeat_count}x</strong> ${g.gift_name}</td>
+                    <td class="hide-sm"><strong>${g.repeat_count}x</strong> ${g.gift_name}</td>
                     <td class="num-col"><strong>${fmtNum(g.total_coins)}</strong></td>
                     <td class="num-col"><strong>${fmtEUR(g.eur_net)}</strong></td>
-                    <td class="num-col">${fmtUSD(g.usd_net)}</td>
-                    <td class="mono muted">${g.source}</td>
+                    <td class="num-col hide-sm">${fmtUSD(g.usd_net)}</td>
+                    <td class="mono muted hide-sm">${g.source}</td>
                 </tr>
             `;
         })
@@ -334,12 +363,12 @@ function renderTelegramUsers(users, accessMode) {
 
             return `
                 <tr>
-                    <td class="mono">${u.telegram_id || `<span class="muted">wird bei Nachricht verknüpft</span>`}</td>
+                    <td class="mono hide-sm">${u.telegram_id || `<span class="muted">wird bei Nachricht verknüpft</span>`}</td>
                     <td><strong>${unameStr}</strong>${fnameStr}</td>
                     <td class="mono">${roleBadge}</td>
                     <td>${statusHtml}</td>
-                    <td class="mono muted">${u.note || "-"}</td>
-                    <td class="mono muted">${lastSeen}</td>
+                    <td class="mono muted hide-sm">${u.note || "-"}</td>
+                    <td class="mono muted hide-md">${lastSeen}</td>
                     <td>
                         <div class="action-group">
                             ${
@@ -518,7 +547,10 @@ function openStreamerAnalytics(streamerId) {
     if (sel) {
         sel.value = String(streamerId);
     }
+    lastAnalyticsFingerprint = null;
+    analyticsLoadedOnce = true;
     switchTab("tab-analytics");
+    loadAnalytics();
 }
 
 function setChartEmptyState(canvasId, msg = "Keine Daten im gewählten Zeitraum vorhanden") {
@@ -694,6 +726,19 @@ function renderTimelineChart(data) {
         ];
     }
 
+    if (chartTimelineInstance && chartTimelineInstance.config.type === chartType) {
+        chartTimelineInstance.data.labels = labels;
+        chartTimelineInstance.data.datasets = datasets;
+        chartTimelineInstance.options.scales = scales;
+        chartTimelineInstance.update("none");
+        return;
+    }
+
+    if (chartTimelineInstance) {
+        chartTimelineInstance.destroy();
+        chartTimelineInstance = null;
+    }
+
     chartTimelineInstance = new Chart(canvas, {
         type: chartType,
         data: { labels, datasets },
@@ -724,11 +769,6 @@ function renderCompareChart(data) {
     const canvas = document.getElementById("chartCompare");
     if (!canvas || typeof Chart === "undefined") return;
 
-    if (chartCompareInstance) {
-        chartCompareInstance.destroy();
-        chartCompareInstance = null;
-    }
-
     const colors = getChartThemeColors();
     const titleEl = document.getElementById("compareChartTitle");
     const subEl = document.getElementById("compareChartSubtitle");
@@ -739,6 +779,10 @@ function renderCompareChart(data) {
 
         const topStreamers = (data.streamers_ranking || []).slice(0, 10);
         if (topStreamers.length === 0) {
+            if (chartCompareInstance) {
+                chartCompareInstance.destroy();
+                chartCompareInstance = null;
+            }
             setChartEmptyState("chartCompare", "Keine Streamer-Daten vorhanden.");
             return;
         }
@@ -747,6 +791,18 @@ function renderCompareChart(data) {
         const labels = topStreamers.map(s => `@${s.username}`);
         const coinsData = topStreamers.map(s => s.total_coins);
         const eurData = topStreamers.map(s => s.eur_net);
+
+        if (chartCompareInstance && chartCompareInstance.options.indexAxis === "y") {
+            chartCompareInstance.data.labels = labels;
+            chartCompareInstance.data.datasets[0].data = coinsData;
+            chartCompareInstance.update("none");
+            return;
+        }
+
+        if (chartCompareInstance) {
+            chartCompareInstance.destroy();
+            chartCompareInstance = null;
+        }
 
         chartCompareInstance = new Chart(canvas, {
             type: "bar",
@@ -794,6 +850,10 @@ function renderCompareChart(data) {
 
         const sess = (data.sessions || []).slice(0, 10).reverse();
         if (sess.length === 0) {
+            if (chartCompareInstance) {
+                chartCompareInstance.destroy();
+                chartCompareInstance = null;
+            }
             setChartEmptyState("chartCompare", "Keine aufgezeichneten Sessions für diesen Streamer.");
             return;
         }
@@ -802,6 +862,19 @@ function renderCompareChart(data) {
         const labels = sess.map(s => `#${s.id} (${(s.started_at || "").slice(5, 10)})`);
         const coinsData = sess.map(s => s.session_coins);
         const viewersData = sess.map(s => s.peak_viewers);
+
+        if (chartCompareInstance && chartCompareInstance.options.indexAxis !== "y" && chartCompareInstance.data.datasets.length === 2) {
+            chartCompareInstance.data.labels = labels;
+            chartCompareInstance.data.datasets[0].data = coinsData;
+            chartCompareInstance.data.datasets[1].data = viewersData;
+            chartCompareInstance.update("none");
+            return;
+        }
+
+        if (chartCompareInstance) {
+            chartCompareInstance.destroy();
+            chartCompareInstance = null;
+        }
 
         chartCompareInstance = new Chart(canvas, {
             type: "bar",
@@ -866,11 +939,6 @@ function renderTimeOfDayChart(data) {
     const canvas = document.getElementById("chartTimeOfDay");
     if (!canvas || typeof Chart === "undefined") return;
 
-    if (chartTimeOfDayInstance) {
-        chartTimeOfDayInstance.destroy();
-        chartTimeOfDayInstance = null;
-    }
-
     const tod = data.time_of_day || [];
     clearChartEmptyState("chartTimeOfDay");
 
@@ -884,6 +952,14 @@ function renderTimeOfDayChart(data) {
         if (c === maxCoins && c > 0) return colors.accentGold;
         return colors.accentPurple + "bb";
     });
+
+    if (chartTimeOfDayInstance) {
+        chartTimeOfDayInstance.data.labels = labels;
+        chartTimeOfDayInstance.data.datasets[0].data = coinsData;
+        chartTimeOfDayInstance.data.datasets[0].backgroundColor = bgColors;
+        chartTimeOfDayInstance.update("none");
+        return;
+    }
 
     chartTimeOfDayInstance = new Chart(canvas, {
         type: "bar",
@@ -935,13 +1011,12 @@ function renderGiftDistChart(data) {
     const canvas = document.getElementById("chartGiftDist");
     if (!canvas || typeof Chart === "undefined") return;
 
-    if (chartGiftDistInstance) {
-        chartGiftDistInstance.destroy();
-        chartGiftDistInstance = null;
-    }
-
     const gifts = data.top_gifts || [];
     if (gifts.length === 0) {
+        if (chartGiftDistInstance) {
+            chartGiftDistInstance.destroy();
+            chartGiftDistInstance = null;
+        }
         setChartEmptyState("chartGiftDist", "Keine Geschenke im gewählten Zeitraum aufgezeichnet.");
         return;
     }
@@ -959,6 +1034,14 @@ function renderGiftDistChart(data) {
         labels.push("Andere Geschenke");
         values.push(otherCoins);
         bgColors.push(colors.mutedColor);
+    }
+
+    if (chartGiftDistInstance) {
+        chartGiftDistInstance.data.labels = labels;
+        chartGiftDistInstance.data.datasets[0].data = values;
+        chartGiftDistInstance.data.datasets[0].backgroundColor = bgColors;
+        chartGiftDistInstance.update("none");
+        return;
     }
 
     chartGiftDistInstance = new Chart(canvas, {
@@ -1004,13 +1087,12 @@ function renderTopGiftersChart(data) {
     const canvas = document.getElementById("chartTopGifters");
     if (!canvas || typeof Chart === "undefined") return;
 
-    if (chartTopGiftersInstance) {
-        chartTopGiftersInstance.destroy();
-        chartTopGiftersInstance = null;
-    }
-
     const gifters = (data.top_gifters || []).slice(0, 10);
     if (gifters.length === 0) {
+        if (chartTopGiftersInstance) {
+            chartTopGiftersInstance.destroy();
+            chartTopGiftersInstance = null;
+        }
         setChartEmptyState("chartTopGifters", "Keine Spenderdaten im gewählten Zeitraum vorhanden.");
         return;
     }
@@ -1020,6 +1102,13 @@ function renderTopGiftersChart(data) {
     const labels = gifters.map(g => `@${g.sender_username}`);
     const coinsData = gifters.map(g => g.total_coins);
     const eurData = gifters.map(g => g.eur_net);
+
+    if (chartTopGiftersInstance) {
+        chartTopGiftersInstance.data.labels = labels;
+        chartTopGiftersInstance.data.datasets[0].data = coinsData;
+        chartTopGiftersInstance.update("none");
+        return;
+    }
 
     chartTopGiftersInstance = new Chart(canvas, {
         type: "bar",
@@ -1084,10 +1173,10 @@ function renderAnalyticsTables(data) {
                             <strong>@${g.sender_username}</strong> ${sfBadge}
                             ${g.sender_nickname && g.sender_nickname !== g.sender_username ? `<div class="mono muted" style="font-size:11px;">${g.sender_nickname}</div>` : ""}
                         </td>
-                        <td class="num-col">${fmtNum(g.gifts_sent)} (${fmtNum(g.transactions)})</td>
+                        <td class="num-col hide-sm">${fmtNum(g.gifts_sent)} (${fmtNum(g.transactions)})</td>
                         <td class="num-col"><strong>${fmtNum(g.total_coins)}</strong></td>
                         <td class="num-col"><strong>${fmtEUR(g.eur_net)}</strong></td>
-                        <td class="num-col">
+                        <td class="num-col hide-sm">
                             <div class="pct-bar-wrapper">
                                 <span class="pct-pill">${g.pct_of_total}%</span>
                                 <span class="pct-bar-fill" style="width:${Math.max(2, Math.min(60, g.pct_of_total * 0.6))}px;"></span>
@@ -1116,11 +1205,11 @@ function renderAnalyticsTables(data) {
                             <strong>${g.gift_name}</strong>
                             ${g.gift_id ? `<span class="mono muted" style="font-size:10.5px;">(#${g.gift_id})</span>` : ""}
                         </td>
-                        <td class="num-col">${fmtNum(g.diamond_count)}</td>
-                        <td class="num-col">${fmtNum(g.total_quantity)}x</td>
+                        <td class="num-col hide-sm">${fmtNum(g.diamond_count)}</td>
+                        <td class="num-col hide-sm">${fmtNum(g.total_quantity)}x</td>
                         <td class="num-col"><strong>${fmtNum(g.total_coins)}</strong></td>
                         <td class="num-col"><strong>${fmtEUR(g.eur_net)}</strong></td>
-                        <td class="num-col">
+                        <td class="num-col hide-sm">
                             <div class="pct-bar-wrapper">
                                 <span class="pct-pill">${g.pct_of_total}%</span>
                                 <span class="pct-bar-fill" style="width:${Math.max(2, Math.min(60, g.pct_of_total * 0.6))}px;"></span>
@@ -1151,18 +1240,18 @@ function renderAnalyticsTables(data) {
 
                 return `
                     <tr>
-                        <td class="mono muted">#${ss.id}</td>
+                        <td class="mono muted hide-sm">#${ss.id}</td>
                         <td>
                             <strong>${ss.streamer_display_name}</strong>
                             <div class="mono muted" style="font-size:11px;">@${ss.streamer_username}</div>
                         </td>
                         <td class="mono">${(ss.started_at || "").replace("T", " ")}</td>
                         <td class="num-col">${durStr}</td>
-                        <td class="num-col"><strong>${fmtNum(ss.peak_viewers)}</strong></td>
-                        <td>${statusTag}</td>
+                        <td class="num-col hide-sm"><strong>${fmtNum(ss.peak_viewers)}</strong></td>
+                        <td class="hide-sm">${statusTag}</td>
                         <td class="num-col"><strong>${fmtNum(ss.session_coins)}</strong></td>
                         <td class="num-col"><strong>${fmtEUR(ss.eur_net)}</strong></td>
-                        <td class="num-col mono"><strong>${fmtNum(ss.coins_per_hour)}</strong> <span class="muted">/h</span></td>
+                        <td class="num-col mono hide-md"><strong>${fmtNum(ss.coins_per_hour)}</strong> <span class="muted">/h</span></td>
                     </tr>
                 `;
             }).join("");
@@ -1182,26 +1271,38 @@ async function loadAnalytics(isBackground = false) {
         const data = await res.json();
         cachedAnalyticsData = data;
 
-        // KPI updates
         const t = data.totals || {};
-        document.getElementById("anNetEur").textContent = fmtEUR(t.eur_net);
-        document.getElementById("anNetUsd").textContent = `${fmtUSD(t.usd_net)} USD`;
-        document.getElementById("anGrossEur").textContent = fmtEUR(t.eur_gross);
-        document.getElementById("anCoins").textContent = fmtNum(t.total_coins);
-        document.getElementById("anAvgCoinsPerGift").textContent = `Ø ${fmtNum(t.avg_coins_per_gift)} Coins pro Gift`;
-        document.getElementById("anGiftsCount").textContent = `${fmtNum(t.total_gifts_sent)} Gifts`;
-        document.getElementById("anGiftEventsCount").textContent = `${fmtNum(t.gift_events_count)} Transaktionen`;
-        document.getElementById("anUniqueGifters").textContent = `${fmtNum(t.unique_gifters)} Spender`;
-        document.getElementById("anAvgPerGifter").textContent = `Ø ${fmtEUR(t.avg_eur_per_gifter)} pro Spender`;
+        const fingerprint = `${t.total_coins}_${t.gift_events_count}_${t.sessions_count}_${(data.timeline || []).length}_${(data.top_gifters || []).length}_${analyticsPeriod}_${analyticsStreamerId}_${analyticsTimelineMode}`;
+        if (isBackground && lastAnalyticsFingerprint === fingerprint) {
+            updateAnalyticsTimestamp();
+            return;
+        }
+        lastAnalyticsFingerprint = fingerprint;
 
-        document.getElementById("anWhaleTop1").textContent = `${t.whale_share_top1_pct || 0.0}%`;
-        document.getElementById("anWhaleTop3").textContent = `${t.whale_share_top3_pct || 0.0}%`;
-        document.getElementById("anWhaleTop5").textContent = `${t.whale_share_top5_pct || 0.0}%`;
+        // KPI updates
+        const setText = (id, val) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = val;
+        };
+
+        setText("anNetEur", fmtEUR(t.eur_net));
+        setText("anNetUsd", `${fmtUSD(t.usd_net)} USD`);
+        setText("anGrossEur", fmtEUR(t.eur_gross));
+        setText("anCoins", fmtNum(t.total_coins));
+        setText("anAvgCoinsPerGift", `Ø ${fmtNum(t.avg_coins_per_gift)} Coins pro Gift`);
+        setText("anGiftsCount", `${fmtNum(t.total_gifts_sent)} Gifts`);
+        setText("anGiftEventsCount", `${fmtNum(t.gift_events_count)} Transaktionen`);
+        setText("anUniqueGifters", `${fmtNum(t.unique_gifters)} Spender`);
+        setText("anAvgPerGifter", `Ø ${fmtEUR(t.avg_eur_per_gifter)} pro Spender`);
+
+        setText("anWhaleTop1", `${t.whale_share_top1_pct || 0.0}%`);
+        setText("anWhaleTop3", `${t.whale_share_top3_pct || 0.0}%`);
+        setText("anWhaleTop5", `${t.whale_share_top5_pct || 0.0}%`);
 
         const totalMins = t.total_stream_minutes || 0;
         const hoursStr = (totalMins / 60).toFixed(1);
-        document.getElementById("anSessionsCount").textContent = `${fmtNum(t.sessions_count || 0)} Sessions`;
-        document.getElementById("anStreamDuration").textContent = `${hoursStr} Std. Gesamtlaufzeit`;
+        setText("anSessionsCount", `${fmtNum(t.sessions_count || 0)} Sessions`);
+        setText("anStreamDuration", `${hoursStr} Std. Gesamtlaufzeit`);
 
         // Streamer Meta Banner
         const banner = document.getElementById("anStreamerMetaBanner");
@@ -1221,6 +1322,8 @@ async function loadAnalytics(isBackground = false) {
         try { renderGiftDistChart(data); } catch (e) { console.error("Fehler renderGiftDistChart:", e); }
         try { renderTopGiftersChart(data); } catch (e) { console.error("Fehler renderTopGiftersChart:", e); }
         try { renderAnalyticsTables(data); } catch (e) { console.error("Fehler renderAnalyticsTables:", e); }
+
+        updateAnalyticsTimestamp();
     } catch (e) {
         console.error("Fehler beim Laden der Analytics:", e);
     }
@@ -1306,6 +1409,40 @@ function renderLiveActiveBattles(liveBattles) {
     container.style.display = "block";
     list.innerHTML = validLive.map(item => {
         const b = item.battle || {};
+        const isInternal = Boolean(b.is_internal);
+
+        if (isInternal) {
+            const sA = b.streamer_a || {};
+            const sB = b.streamer_b || {};
+            const scoreA = (sA.score || 0).toLocaleString("de-DE");
+            const scoreB = (sB.score || 0).toLocaleString("de-DE");
+            const totCoins = (b.total_coins || 0).toLocaleString("de-DE");
+            const totEur = fmtEUR(b.total_eur_net || 0);
+
+            return `
+                <div class="live-active-card card-derby" style="background:var(--bg-card); border:1px solid #8b5cf6; border-left:4px solid #8b5cf6; border-radius:6px; padding:12px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                    <div style="display:flex; align-items:center; gap:12px;">
+                        <span class="live-pulse" style="background:#8b5cf6;"></span>
+                        <div>
+                            <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                                <span class="mode-badge mode-derby" style="font-size:10px; padding:1px 6px;">⚔️ INTERNES DERBY</span>
+                                <strong>@${escapeHtml(sA.username || '')}</strong> <span class="pct-pill" style="font-size:10px; color:#10b981; border-color:#10b981;">+${fmtEUR(sA.eur_net || 0)}</span>
+                                <span style="color:#8b5cf6; font-weight:800;">VS</span>
+                                <strong>@${escapeHtml(sB.username || '')}</strong> <span class="pct-pill" style="font-size:10px; color:#10b981; border-color:#10b981;">+${fmtEUR(sB.eur_net || 0)}</span>
+                            </div>
+                            <div class="muted" style="font-size:11px; margin-top:2px;">Battle #${escapeHtml(String(b.battle_id || ""))} · Live im Gange</div>
+                        </div>
+                    </div>
+                    <div style="font-family:'JetBrains Mono', Consolas, monospace; font-size:18px; font-weight:800;">
+                        <span style="color:#38bdf8;">${scoreA}</span> : <span style="color:#ec4899;">${scoreB}</span>
+                    </div>
+                    <div style="text-align:right;">
+                        <span class="pct-pill" style="border-color:#f59e0b; color:#f59e0b; font-weight:700;">🔥 +${totCoins} Coins (${totEur})</span>
+                    </div>
+                </div>
+            `;
+        }
+
         const sName = escapeHtml(item.username || "Streamer");
         const oName = escapeHtml(b.opponent_display_name || b.opponent_username || "Gegner");
         const sScore = (b.streamer_score || 0).toLocaleString("de-DE");
@@ -1387,11 +1524,34 @@ function renderBattlesFeed(data) {
         const isFfa = bMode === "1v1v1" || bMode === "1v1v1v1";
         const is2v2 = bMode === "2v2" || Boolean(b.teammate_username);
 
+        const isInternal = Boolean(b.is_internal);
         let cardClass = "card-draw";
         let resultLabel = "🤝 UNENTSCHIEDEN";
         let resultClass = "draw";
 
-        if (isFfa && !isOngoing) {
+        if (isInternal) {
+            cardClass = "card-derby";
+            if (b.is_single_view) {
+                if (isWin) {
+                    resultLabel = "🏆 SIEG (INTERNES DUELL)";
+                    resultClass = "win";
+                } else if (isLose) {
+                    resultLabel = "❌ NIEDERLAGE (INTERNES DUELL)";
+                    resultClass = "lose";
+                } else {
+                    resultLabel = "🤝 UNENTSCHIEDEN";
+                    resultClass = "draw";
+                }
+            } else {
+                if (b.winner_username) {
+                    resultLabel = `🏆 SIEGER: @${escapeHtml(b.winner_username)}`;
+                    resultClass = "win";
+                } else {
+                    resultLabel = "🤝 UNENTSCHIEDEN";
+                    resultClass = "draw";
+                }
+            }
+        } else if (isFfa && !isOngoing) {
             const rank = b.streamer_rank || (isWin ? 1 : 2);
             if (rank === 1) {
                 cardClass = "card-win";
@@ -1443,7 +1603,9 @@ function renderBattlesFeed(data) {
         const matchDate = b.started_at ? b.started_at.replace("T", " ").substring(0, 16) : "-";
 
         let modeBadge = `<span class="mode-badge mode-1v1">⚔️ 1 VS 1</span>`;
-        if (bMode === "2v2") {
+        if (isInternal) {
+            modeBadge = `<span class="mode-badge mode-derby">⚔️ INTERNES DERBY</span>`;
+        } else if (bMode === "2v2") {
             modeBadge = `<span class="mode-badge mode-2v2">👥 2 VS 2 TEAM</span>`;
         } else if (bMode === "1v1v1") {
             modeBadge = `<span class="mode-badge mode-1v1v1">🔺 1 VS 1 VS 1 (3ER)</span>`;
@@ -1592,6 +1754,47 @@ function renderBattlesFeed(data) {
                     </div>
                 </div>
             `;
+        } else if (isInternal) {
+            const sA = b.streamer_a || {};
+            const sB = b.streamer_b || {};
+            const isWinnerA = Boolean(b.winner_username && b.winner_username === sA.username);
+            const isWinnerB = Boolean(b.winner_username && b.winner_username === sB.username);
+
+            matchupRowHtml = `
+                <div class="battle-matchup-row">
+                    <!-- Streamer A Seite -->
+                    <div class="battle-participant streamer-side">
+                        <img class="battle-avatar ${isWinnerA ? 'winner-ring' : ''}" src="${sA.avatar_url || sAvatar}" alt="Streamer A" onerror="this.src='/static/avatar_default.png';">
+                        <div class="participant-details">
+                            <span class="participant-name">${escapeHtml(sA.display_name || sA.username || '')}</span>
+                            <span class="participant-uname">@${escapeHtml(sA.username || '')} <span class="internal-streamer-pill">Getrackt</span></span>
+                            <span class="participant-score ${isWinnerA ? 'score-win' : ''}">${(sA.score || sScore).toLocaleString("de-DE")}</span>
+                            <span class="internal-earnings-tag">+${fmtNum(sA.coins_earned || 0)} 💎 (${fmtEUR(sA.eur_net || 0)})</span>
+                        </div>
+                    </div>
+
+                    <!-- Versus Mitte -->
+                    <div class="battle-versus-center">
+                        <span class="vs-badge" style="background:linear-gradient(135deg, #ec4899, #8b5cf6); color:#fff; border:none;">VS</span>
+                        <div class="versus-bar-container" title="${sPct}% vs ${oPct}%">
+                            <div class="versus-bar-fill-streamer" style="width:${sPct}%; background:#38bdf8;"></div>
+                            <div class="versus-bar-fill-opponent" style="width:${oPct}%; background:#ec4899;"></div>
+                        </div>
+                        <span class="score-delta-text">${deltaText} (${sPct}% : ${oPct}%)</span>
+                    </div>
+
+                    <!-- Streamer B Seite -->
+                    <div class="battle-participant opponent-side">
+                        <div class="participant-details">
+                            <span class="participant-name">${escapeHtml(sB.display_name || sB.username || '')}</span>
+                            <span class="participant-uname"><span class="internal-streamer-pill">Getrackt</span> @${escapeHtml(sB.username || '')}</span>
+                            <span class="participant-score ${isWinnerB ? 'score-win' : ''}">${(sB.score || oScore).toLocaleString("de-DE")}</span>
+                            <span class="internal-earnings-tag">+${fmtNum(sB.coins_earned || 0)} 💎 (${fmtEUR(sB.eur_net || 0)})</span>
+                        </div>
+                        <img class="battle-avatar ${isWinnerB ? 'winner-ring' : ''}" src="${sB.avatar_url || oAvatar}" alt="Streamer B" onerror="this.src='/static/avatar_default.png';">
+                    </div>
+                </div>
+            `;
         } else {
             matchupRowHtml = `
                 <div class="battle-matchup-row">
@@ -1643,24 +1846,33 @@ function renderBattlesFeed(data) {
                 <!-- MVP Strip -->
                 <div class="battle-mvp-strip">
                     <div class="mvp-item">
-                        <span class="muted">Top-Spender:</span>
-                        <strong>${escapeHtml(b.streamer_mvp_name || 'Kein MVP')}</strong>
-                        ${b.streamer_mvp_score ? `<span class="pct-pill">${b.streamer_mvp_score.toLocaleString("de-DE")} Pkt</span>` : ''}
+                        <span class="muted">${isInternal ? 'MVP @' + escapeHtml(b.streamer_a?.username || 'A') + ':' : 'Top-Spender:'}</span>
+                        <strong>${escapeHtml((isInternal ? b.streamer_a?.mvp_name : b.streamer_mvp_name) || 'Kein MVP')}</strong>
+                        ${(isInternal ? b.streamer_a?.mvp_score : b.streamer_mvp_score) ? `<span class="pct-pill">${(isInternal ? b.streamer_a.mvp_score : b.streamer_mvp_score).toLocaleString("de-DE")} Pkt</span>` : ''}
                     </div>
                     <div class="mvp-item">
-                        <span class="muted">Gegner-MVP:</span>
-                        <strong>${escapeHtml(b.opponent_mvp_name || 'Kein MVP')}</strong>
-                        ${b.opponent_mvp_score ? `<span class="pct-pill">${b.opponent_mvp_score.toLocaleString("de-DE")} Pkt</span>` : ''}
+                        <span class="muted">${isInternal ? 'MVP @' + escapeHtml(b.streamer_b?.username || 'B') + ':' : 'Gegner-MVP:'}</span>
+                        <strong>${escapeHtml((isInternal ? b.streamer_b?.mvp_name : b.opponent_mvp_name) || 'Kein MVP')}</strong>
+                        ${(isInternal ? b.streamer_b?.mvp_score : b.opponent_mvp_score) ? `<span class="pct-pill">${(isInternal ? b.streamer_b.mvp_score : b.opponent_mvp_score).toLocaleString("de-DE")} Pkt</span>` : ''}
                     </div>
                 </div>
 
                 <!-- Footer mit Einnahmen und Button für Grafik -->
                 <div class="battle-card-footer">
+                    ${isInternal ? `
+                    <div class="battle-earnings-pill" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                        <span style="font-weight:700; color:#c9d1d9;">🔥 Gesamtvolumen:</span>
+                        <span class="coins" style="font-weight:800;">+${(b.total_coins || b.coins_earned || 0).toLocaleString("de-DE")} Coins</span>
+                        <span class="eur" style="font-weight:800;">(~ ${(b.total_eur_net || b.eur_net || 0).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € Netto)</span>
+                        <span class="muted" style="font-size:11px; margin-left:auto;">(@${escapeHtml(b.streamer_a?.username || '')}: ${fmtEUR(b.streamer_a?.eur_net || 0)} | @${escapeHtml(b.streamer_b?.username || '')}: ${fmtEUR(b.streamer_b?.eur_net || 0)})</span>
+                    </div>
+                    ` : `
                     <div class="battle-earnings-pill">
                         <span>Duell-Einnahmen:</span>
                         <span class="coins">+${(b.coins_earned || 0).toLocaleString("de-DE")} Coins</span>
                         <span class="eur">(~ ${(b.eur_net || 0).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € Netto)</span>
                     </div>
+                    `}
                     <div class="battle-btn-group">
                         <button type="button" class="sm primary" onclick="openBattleGraphicModal(${b.id})">🎨 Grafik anzeigen</button>
                     </div>
@@ -1744,11 +1956,11 @@ function renderBattleRivals(rivals) {
                     </div>
                 </td>
                 <td class="num-col"><strong>${r.matches_count}</strong></td>
-                <td class="num-col mono">${r.wins}S - ${r.losses}N - ${r.draws}U</td>
+                <td class="num-col mono hide-sm">${r.wins}S - ${r.losses}N - ${r.draws}U</td>
                 <td class="num-col mono" style="font-weight:700; color:${winrateColor};">${winrate} %</td>
-                <td class="num-col mono">${(r.avg_streamer_score || 0).toLocaleString("de-DE")}</td>
-                <td class="num-col mono">${(r.avg_opponent_score || 0).toLocaleString("de-DE")}</td>
-                <td class="num-col mono" style="color:#f59e0b; font-weight:700;">${fmtNum(r.total_coins || 0)}</td>
+                <td class="num-col mono hide-md">${(r.avg_streamer_score || 0).toLocaleString("de-DE")}</td>
+                <td class="num-col mono hide-md">${(r.avg_opponent_score || 0).toLocaleString("de-DE")}</td>
+                <td class="num-col mono hide-sm" style="color:#f59e0b; font-weight:700;">${fmtNum(r.total_coins || 0)}</td>
                 <td class="num-col mono" style="color:#10b981; font-weight:700;">${fmtEUR(r.total_eur_net || 0)}</td>
             </tr>
         `;
@@ -2505,15 +2717,29 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     loadOverview();
-    setInterval(() => {
-        loadOverview();
-        if (document.getElementById("tab-analytics")?.classList.contains("active")) {
-            loadAnalytics(true);
-        } else if (document.getElementById("tab-battles")?.classList.contains("active")) {
-            loadBattles(true);
-            loadBattleStats();
+    let overviewTimer = null;
+    function scheduleNextOverview() {
+        if (overviewTimer) clearTimeout(overviewTimer);
+        const delay = document.hidden ? 30000 : 5000;
+        overviewTimer = setTimeout(async () => {
+            if (!document.hidden) {
+                await loadOverview();
+                if (document.getElementById("tab-battles")?.classList.contains("active")) {
+                    loadBattles(true);
+                    loadBattleStats();
+                }
+            }
+            scheduleNextOverview();
+        }, delay);
+    }
+    scheduleNextOverview();
+
+    document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) {
+            loadOverview();
+            scheduleNextOverview();
         }
-    }, 4000);
+    });
 
     document.getElementById("periodSelect").addEventListener("change", (e) => {
         currentPeriod = e.target.value;
@@ -2522,21 +2748,46 @@ document.addEventListener("DOMContentLoaded", () => {
 
     document.getElementById("selectAnalyticsStreamer")?.addEventListener("change", (e) => {
         analyticsStreamerId = e.target.value;
+        lastAnalyticsFingerprint = null;
         loadAnalytics();
     });
 
     document.getElementById("selectAnalyticsPeriod")?.addEventListener("change", (e) => {
         analyticsPeriod = e.target.value;
+        lastAnalyticsFingerprint = null;
         loadAnalytics();
     });
 
     document.getElementById("btnRefreshAnalytics")?.addEventListener("click", () => {
+        lastAnalyticsFingerprint = null;
         loadAnalytics();
     });
 
     document.getElementById("btnTimelineToggleMetric")?.addEventListener("click", () => {
+        lastAnalyticsFingerprint = null;
         toggleTimelineMetric();
     });
+
+    // Auto-Refresh (30s) Steuerung
+    const chkAutoRefresh = document.getElementById("chkAnalyticsAutoRefresh");
+    if (chkAutoRefresh) {
+        chkAutoRefresh.addEventListener("change", () => {
+            if (chkAutoRefresh.checked) {
+                if (analyticsAutoRefreshTimer) clearInterval(analyticsAutoRefreshTimer);
+                analyticsAutoRefreshTimer = setInterval(() => {
+                    if (document.getElementById("tab-analytics")?.classList.contains("active") && chkAutoRefresh.checked) {
+                        loadAnalytics(true);
+                    }
+                }, 30000);
+                loadAnalytics(true);
+            } else {
+                if (analyticsAutoRefreshTimer) {
+                    clearInterval(analyticsAutoRefreshTimer);
+                    analyticsAutoRefreshTimer = null;
+                }
+            }
+        });
+    }
 
     document.getElementById("btnRefresh").addEventListener("click", loadOverview);
 
@@ -2871,4 +3122,221 @@ document.addEventListener("DOMContentLoaded", () => {
 
     btnInspect?.addEventListener("click", inspectSqliteDatabase);
     btnRunImport?.addEventListener("click", runSqliteImport);
+    document.getElementById("btnRefreshHealth")?.addEventListener("click", () => {
+        fetchSystemHealth(true);
+    });
 });
+
+async function fetchSystemHealth(forceRefresh = false) {
+    const btn = document.getElementById("btnRefreshHealth");
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = "⏳ Lade...";
+    }
+    try {
+        const url = `/api/system/health${forceRefresh ? "?force_refresh=true" : ""}`;
+        const res = await fetch(url);
+        if (!res.ok) return;
+        const health = await res.json();
+        renderSystemHealth(health);
+    } catch (e) {
+        console.error("Fehler beim Abrufen der System-Health:", e);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = "🔄 Aktualisieren";
+        }
+    }
+}
+
+function renderSystemHealth(health) {
+    if (!health) return;
+    const host = health.host || {};
+    const disk = host.disk || {};
+    const mem = host.memory || {};
+    const cpu = host.cpu || {};
+    const docker = health.docker || {};
+    const db = health.database || {};
+
+    const fmtMbOrGb = (mb) => {
+        if (!mb && mb !== 0) return "--";
+        return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
+    };
+
+    // 1. Host Disk
+    const diskPct = typeof disk.percent === "number" ? disk.percent : 0;
+    const elDiskPct = document.getElementById("gaugeDiskPercent");
+    const elDiskBar = document.getElementById("gaugeDiskBar");
+    const elDiskUsed = document.getElementById("gaugeDiskUsed");
+    const elDiskFree = document.getElementById("gaugeDiskFree");
+    const elDiskTotal = document.getElementById("gaugeDiskTotal");
+
+    if (elDiskPct) elDiskPct.textContent = `${diskPct.toFixed(1)}%`;
+    if (elDiskBar) {
+        elDiskBar.style.width = `${Math.min(diskPct, 100)}%`;
+        if (disk.status === "critical" || diskPct >= 85) {
+            elDiskBar.style.background = "#ef4444";
+        } else if (disk.status === "warning" || diskPct >= 75) {
+            elDiskBar.style.background = "#f59e0b";
+        } else {
+            elDiskBar.style.background = "#10b981";
+        }
+    }
+    if (elDiskUsed) elDiskUsed.textContent = `${disk.used_gb || 0} GB`;
+    if (elDiskFree) elDiskFree.textContent = `${disk.free_gb || 0} GB`;
+    if (elDiskTotal) elDiskTotal.textContent = `${disk.total_gb || 0} GB`;
+
+    // 2. Host RAM
+    const memPct = typeof mem.percent === "number" ? mem.percent : 0;
+    const elRamPct = document.getElementById("gaugeRamPercent");
+    const elRamBar = document.getElementById("gaugeRamBar");
+    const elRamUsed = document.getElementById("gaugeRamUsed");
+    const elRamFree = document.getElementById("gaugeRamFree");
+    const elRamTotal = document.getElementById("gaugeRamTotal");
+
+    if (elRamPct) elRamPct.textContent = `${memPct.toFixed(1)}%`;
+    if (elRamBar) {
+        elRamBar.style.width = `${Math.min(memPct, 100)}%`;
+        if (memPct >= 90) elRamBar.style.background = "#ef4444";
+        else if (memPct >= 75) elRamBar.style.background = "#f59e0b";
+        else elRamBar.style.background = "#3b82f6";
+    }
+    if (elRamUsed) elRamUsed.textContent = fmtMbOrGb(mem.used_mb);
+    if (elRamFree) elRamFree.textContent = fmtMbOrGb(mem.free_mb);
+    if (elRamTotal) elRamTotal.textContent = fmtMbOrGb(mem.total_mb);
+
+    // 3. Host CPU & Load
+    const cpuPct = typeof cpu.percent === "number" ? cpu.percent : 0;
+    const elCpuPct = document.getElementById("gaugeCpuPercent");
+    const elCpuBar = document.getElementById("gaugeCpuBar");
+    const elCpuLoad = document.getElementById("gaugeCpuLoad");
+    const elCpuCores = document.getElementById("gaugeCpuCores");
+
+    if (elCpuPct) elCpuPct.textContent = `${cpuPct.toFixed(1)}%`;
+    if (elCpuBar) {
+        elCpuBar.style.width = `${Math.min(cpuPct, 100)}%`;
+        if (cpuPct >= 85) elCpuBar.style.background = "#ef4444";
+        else if (cpuPct >= 65) elCpuBar.style.background = "#f59e0b";
+        else elCpuBar.style.background = "#8b5cf6";
+    }
+    if (elCpuLoad) {
+        const l1 = typeof cpu.load_1m === "number" ? cpu.load_1m.toFixed(2) : "-";
+        const l5 = typeof cpu.load_5m === "number" ? cpu.load_5m.toFixed(2) : "-";
+        const l15 = typeof cpu.load_15m === "number" ? cpu.load_15m.toFixed(2) : "-";
+        elCpuLoad.textContent = `${l1} / ${l5} / ${l15}`;
+    }
+    if (elCpuCores) elCpuCores.textContent = `${cpu.cpu_count || 1} Kerne`;
+
+    // 4. Header Badge & Timestamp
+    const elBadge = document.getElementById("healthDockerBadge");
+    const elUpdated = document.getElementById("healthLastUpdated");
+    const elCount = document.getElementById("cntContainerCount");
+
+    if (elBadge) {
+        if (docker.available) {
+            const runningCount = (docker.containers || []).filter(c => c.state === "running").length;
+            elBadge.textContent = `Docker: Verbunden (${runningCount}/${(docker.containers || []).length} aktiv)`;
+            elBadge.className = "status-tag live";
+        } else {
+            elBadge.textContent = "Docker: Nicht verbunden (Host-Only)";
+            elBadge.className = "status-tag polling";
+        }
+    }
+    if (elUpdated) {
+        const d = health.timestamp ? new Date(health.timestamp * 1000) : new Date();
+        elUpdated.textContent = d.toLocaleTimeString("de-DE");
+    }
+    if (elCount) {
+        elCount.textContent = `(${ (docker.containers || []).length } Container)`;
+    }
+
+    // 5. Container Table
+    const elTbody = document.getElementById("tblContainersBody");
+    if (elTbody) {
+        const containers = docker.containers || [];
+        if (!docker.available) {
+            elTbody.innerHTML = `<tr><td colspan="7" class="muted">Docker Socket (/var/run/docker.sock) ist nicht gemountet oder nicht erreichbar (${escapeHtml(docker.error || 'Host-Fallback aktiv')}).</td></tr>`;
+        } else if (containers.length === 0) {
+            elTbody.innerHTML = `<tr><td colspan="7" class="muted">Keine überwachten TokTracker-Container gefunden.</td></tr>`;
+        } else {
+            elTbody.innerHTML = containers.map(c => {
+                const isRunning = c.state === "running";
+                const stateTag = `<span class="status-tag ${isRunning ? 'live' : 'danger'}" style="font-size: 10px;">${escapeHtml(c.status || c.state)}</span>`;
+                const memUsedMb = c.memory ? c.memory.used_mb : 0;
+                const memLimitMb = c.memory ? c.memory.limit_mb : 0;
+                const memPct = c.memory ? c.memory.percent : 0;
+                const memText = `${memUsedMb} MB / ${fmtMbOrGb(memLimitMb)}`;
+                const memBar = `
+                    <div style="display: flex; align-items: center; gap: 6px; width: 110px;">
+                        <div style="flex: 1; height: 6px; background: var(--bg-subtle); border-radius: 3px; overflow: hidden;">
+                            <div style="width: ${Math.min(memPct, 100)}%; height: 100%; background: #3b82f6;"></div>
+                        </div>
+                        <span class="mono muted" style="font-size: 10px; width: 32px; text-align: right;">${memPct.toFixed(0)}%</span>
+                    </div>`;
+                const cpuVal = typeof c.cpu_percent === "number" ? `${c.cpu_percent.toFixed(1)}%` : "--";
+                const rwSize = c.size_rw_mb !== undefined && c.size_rw_mb !== null ? `${c.size_rw_mb} MB` : "--";
+                const rootFs = c.size_root_fs_mb ? `<span class="muted" style="font-size: 10px;"> (${c.size_root_fs_mb} MB)</span>` : "";
+
+                return `
+                    <tr>
+                        <td style="font-weight: 600;">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span style="display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: ${isRunning ? '#10b981' : '#ef4444'};"></span>
+                                <span>${escapeHtml(c.name)}</span>
+                            </div>
+                        </td>
+                        <td>${stateTag}</td>
+                        <td class="mono">${cpuVal}</td>
+                        <td class="mono">${memText}</td>
+                        <td>${memBar}</td>
+                        <td class="mono" style="font-weight: 600; color: #38bdf8;">${rwSize}${rootFs}</td>
+                        <td class="mono muted" style="font-size: 10px;">
+                            <span>${escapeHtml(c.id || '')}</span>
+                            <div style="font-size: 9.5px; opacity: 0.8;">${escapeHtml(c.image || '')}</div>
+                        </td>
+                    </tr>
+                `;
+            }).join("");
+        }
+    }
+
+    // 6. Docker Volumes
+    const elVols = document.getElementById("listVolumesContainer");
+    if (elVols) {
+        const vols = docker.volumes || [];
+        if (vols.length === 0) {
+            elVols.innerHTML = `<span class="muted">Keine Docker-Volumes ermittelt.</span>`;
+        } else {
+            elVols.innerHTML = vols.map(v => {
+                const sz = v.size_mb > 0 ? `${v.size_mb} MB` : (v.usage_data && v.usage_data.Size ? `${(v.usage_data.Size / 1024 / 1024).toFixed(1)} MB` : 'Aktiv');
+                return `
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px dashed var(--border-subtle);">
+                        <span>📁 <strong>${escapeHtml(v.name)}</strong> <span class="muted" style="font-size: 9.5px;">(${escapeHtml(v.driver || 'local')})</span></span>
+                        <span class="mono" style="font-weight: 600; color: #34d399;">${sz}</span>
+                    </div>
+                `;
+            }).join("");
+        }
+    }
+
+    // 7. Database storage & tables
+    const elDbBadge = document.getElementById("dbTotalSizeBadge");
+    const elDbList = document.getElementById("listDbTablesContainer");
+    if (elDbBadge) {
+        const dbEngine = (db.engine || 'MySQL').toUpperCase();
+        elDbBadge.textContent = `${db.total_mb || 0} MB (${dbEngine})`;
+    }
+    if (elDbList) {
+        const tables = db.tables || [];
+        if (tables.length === 0) {
+            elDbList.innerHTML = `<span class="muted">Keine Tabellendaten verfügbar.</span>`;
+        } else {
+            elDbList.innerHTML = tables.slice(0, 6).map(t => `
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px dashed var(--border-subtle);">
+                    <span>📊 <strong>${escapeHtml(t.table)}</strong> <span class="muted" style="font-size: 10px;">(${fmtNum(t.rows || 0)} Zeilen)</span></span>
+                    <span class="mono" style="color: #60a5fa;">${t.size_mb} MB</span>
+                </div>
+            `).join("");
+        }
+    }
+}

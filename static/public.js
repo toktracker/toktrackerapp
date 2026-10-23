@@ -134,10 +134,10 @@ function renderPublicLeaderboard() {
                         <strong><a href="#" onclick="showPublicStreamerDetail(${s.id}); return false;">${s.display_name || s.username}</a></strong>
                         <div class="mono muted">@${s.username}</div>
                     </td>
-                    <td>
+                    <td class="hide-sm">
                         ${statusBadge}
                     </td>
-                    <td class="num-col">
+                    <td class="num-col hide-md">
                         <strong>${fmtNum(s.current_viewers || 0)}</strong>
                         <div class="muted">${fmtNum(s.follower_count || 0)} Follower</div>
                     </td>
@@ -146,16 +146,16 @@ function renderPublicLeaderboard() {
                         <div class="muted">${fmtNum(s.total_gifts_sent)} Gifts · ${fmtNum(s.unique_gifters)} Spender</div>
                     </td>
                     <td class="num-col"><strong>${fmtEUR(s.eur_net)}</strong></td>
-                    <td class="num-col">${fmtUSD(s.usd_net)}</td>
-                    <td class="num-col">${fmtEUR(s.eur_gross)}</td>
-                    <td class="mono">
+                    <td class="num-col hide-sm">${fmtUSD(s.usd_net)}</td>
+                    <td class="num-col hide-md">${fmtEUR(s.eur_gross)}</td>
+                    <td class="mono hide-sm">
                         <div>Gift: ${topGift}</div>
                         <div class="muted">Spender: ${topGifter}</div>
                     </td>
                     <td>
                         <div class="action-group">
                             <button type="button" class="sm primary" onclick="showPublicStreamerDetail(${s.id})">Auswertung</button>
-                            <a class="btn-link sm mono" href="https://www.tiktok.com/@${encodeURIComponent(s.username)}/live" target="_blank" rel="noopener">TikTok ↗</a>
+                            <a class="btn-link sm mono hide-sm" href="https://www.tiktok.com/@${encodeURIComponent(s.username)}/live" target="_blank" rel="noopener">TikTok ↗</a>
                         </div>
                     </td>
                 </tr>
@@ -192,13 +192,13 @@ function renderPublicGifts() {
                     <td class="mono"><strong>@${g.streamer_username}</strong></td>
                     <td>
                         ${g.sender_nickname || g.sender_username}
-                        <span class="mono muted">(@${g.sender_username})</span>
+                        <span class="mono muted hide-sm">(@${g.sender_username})</span>
                         ${g.is_super_fan ? `<span class="status-tag polling">SUPERFAN</span>` : ""}
                     </td>
-                    <td><strong>${g.repeat_count}x</strong> ${g.gift_name}</td>
+                    <td class="hide-sm"><strong>${g.repeat_count}x</strong> ${g.gift_name}</td>
                     <td class="num-col"><strong>${fmtNum(g.total_coins)}</strong></td>
                     <td class="num-col"><strong>${fmtEUR(g.eur_net)}</strong></td>
-                    <td class="num-col">${fmtUSD(g.usd_net)}</td>
+                    <td class="num-col hide-sm">${fmtUSD(g.usd_net)}</td>
                 </tr>
             `;
         })
@@ -291,7 +291,25 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     loadPublicOverview();
-    setInterval(loadPublicOverview, 5000);
+    let publicTimer = null;
+    function scheduleNextPublicOverview() {
+        if (publicTimer) clearTimeout(publicTimer);
+        const delay = document.hidden ? 30000 : 5000;
+        publicTimer = setTimeout(async () => {
+            if (!document.hidden) {
+                await loadPublicOverview();
+            }
+            scheduleNextPublicOverview();
+        }, delay);
+    }
+    scheduleNextPublicOverview();
+
+    document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) {
+            loadPublicOverview();
+            scheduleNextPublicOverview();
+        }
+    });
 
     document.getElementById("pubPeriodSelect").addEventListener("change", (e) => {
         currentPublicPeriod = e.target.value;

@@ -1,0 +1,1025 @@
+<!DOCTYPE html>
+<html lang="de" data-theme="dark">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>toktracker – Spender-Radar &amp; Chatlog Übersicht</title>
+
+    <script>
+        (function() {
+            try {
+                const savedTheme = localStorage.getItem("toktracker_theme") || "dark";
+                document.documentElement.setAttribute("data-theme", savedTheme);
+            } catch (e) {}
+        })();
+    </script>
+    <link rel="icon" type="image/jpeg" href="/pictures/bot_avatar.jpg" />
+    <link rel="stylesheet" href="/static/style.css?v=2.5.2" />
+
+    <style>
+        /* Specific styling for Donor Radar & Chatlog */
+        .radar-hero {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            gap: 14px;
+            margin-bottom: 20px;
+        }
+
+        .radar-kpi-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md, 6px);
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            transition: transform 0.15s ease, border-color 0.15s ease;
+        }
+        .radar-kpi-card:hover {
+            transform: translateY(-2px);
+            border-color: var(--border-strong);
+        }
+        .radar-kpi-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+        .radar-kpi-val {
+            font-size: 26px;
+            font-weight: 800;
+            font-family: var(--font-mono, "JetBrains Mono", Consolas, monospace);
+            color: var(--text-main);
+            line-height: 1.2;
+        }
+        .radar-kpi-sub {
+            font-size: 11.5px;
+            color: var(--text-muted);
+            margin-top: 6px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* Tier Badges */
+        .tier-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            font-family: var(--font-mono, monospace);
+        }
+        .tier-whale {
+            background: rgba(147, 51, 234, 0.18);
+            border: 1px solid rgba(168, 85, 247, 0.6);
+            color: #d8b4fe;
+            box-shadow: 0 0 10px rgba(168, 85, 247, 0.2);
+        }
+        .tier-shark {
+            background: rgba(14, 165, 233, 0.18);
+            border: 1px solid rgba(56, 189, 248, 0.6);
+            color: #7dd3fc;
+        }
+        .tier-dolphin {
+            background: rgba(16, 185, 129, 0.18);
+            border: 1px solid rgba(52, 211, 153, 0.6);
+            color: #6ee7b7;
+        }
+        .tier-regular {
+            background: rgba(148, 163, 184, 0.12);
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            color: #94a3b8;
+            font-size: 10px;
+        }
+
+        /* Cross-Streamer Tag */
+        .tag-cross-streamer {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.2) 0%, rgba(239, 68, 68, 0.2) 100%);
+            border: 1px solid rgba(245, 158, 11, 0.6);
+            color: #fbbf24;
+            padding: 2px 7px;
+            border-radius: 4px;
+            font-size: 10.5px;
+            font-weight: 700;
+            font-family: var(--font-mono, monospace);
+        }
+
+        /* Split Layout */
+        .radar-split-container {
+            display: grid;
+            grid-template-columns: 1.15fr 0.85fr;
+            gap: 16px;
+            margin-bottom: 30px;
+        }
+        @media (max-width: 1100px) {
+            .radar-split-container {
+                grid-template-columns: 1fr;
+            }
+        }
+        @media (max-width: 768px) {
+            .chatlog-box {
+                height: 460px;
+            }
+        }
+
+        /* Chatlog Container */
+        .chatlog-box {
+            display: flex;
+            flex-direction: column;
+            height: 680px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md, 6px);
+            overflow: hidden;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.2);
+        }
+        .chatlog-header {
+            padding: 12px 16px;
+            background: var(--bg-subtle);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .chatlog-messages-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            scroll-behavior: smooth;
+        }
+        .chat-bubble {
+            background: var(--bg-subtle);
+            border: 1px solid var(--border-subtle);
+            border-radius: 6px;
+            padding: 10px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            transition: border-color 0.15s ease, background-color 0.15s ease;
+        }
+        .chat-bubble.bubble-whale {
+            border-color: rgba(168, 85, 247, 0.45);
+            background: rgba(168, 85, 247, 0.05);
+        }
+        .chat-bubble.bubble-shark {
+            border-color: rgba(56, 189, 248, 0.45);
+            background: rgba(56, 189, 248, 0.05);
+        }
+        .chat-bubble.bubble-dolphin {
+            border-color: rgba(52, 211, 153, 0.45);
+            background: rgba(52, 211, 153, 0.05);
+        }
+        .chat-bubble:hover {
+            border-color: var(--border-strong);
+        }
+        .chat-user-line {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            font-size: 11.5px;
+        }
+        .chat-user-info {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            overflow: hidden;
+        }
+        .chat-avatar {
+            width: 24px;
+            height: 24px;
+            min-width: 24px;
+            min-height: 24px;
+            max-width: 24px;
+            max-height: 24px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 1px solid var(--border-color);
+            background: var(--bg-surface);
+            display: inline-block;
+            flex-shrink: 0;
+        }
+        .donor-avatar {
+            width: 32px;
+            height: 32px;
+            min-width: 32px;
+            min-height: 32px;
+            max-width: 32px;
+            max-height: 32px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 1px solid var(--border-color);
+            background: var(--bg-surface);
+            display: inline-block;
+            flex-shrink: 0;
+        }
+        .chat-streamer-badge {
+            background: rgba(240, 246, 252, 0.08);
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-size: 10.5px;
+            font-family: var(--font-mono, monospace);
+        }
+        .chat-time {
+            font-size: 10.5px;
+            color: var(--text-muted);
+            font-family: var(--font-mono, monospace);
+        }
+        .chat-text {
+            font-size: 13px;
+            color: var(--text-main);
+            line-height: 1.4;
+            word-break: break-word;
+        }
+        .chat-donor-link {
+            font-weight: 700;
+            color: var(--text-strong);
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .chat-donor-link:hover {
+            color: #38bdf8;
+            text-decoration: underline;
+        }
+
+        /* Modal Styles */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(4px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            padding: 16px;
+        }
+        .modal-content-box {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-strong);
+            border-radius: 8px;
+            max-width: 800px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            display: flex;
+            flex-direction: column;
+        }
+        .modal-header {
+            padding: 16px 20px;
+            background: var(--bg-subtle);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .modal-body {
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        /* VIP & CRM Specific Styles */
+        .vip-star-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            padding: 0 4px;
+            line-height: 1;
+            color: #475569;
+            transition: transform 0.15s ease, color 0.15s ease, text-shadow 0.15s ease;
+            vertical-align: middle;
+            user-select: none;
+        }
+        .vip-star-btn:hover {
+            transform: scale(1.3);
+            color: #facc15;
+        }
+        .vip-star-btn.is-vip {
+            color: #fbbf24;
+            text-shadow: 0 0 10px rgba(251, 191, 36, 0.7);
+        }
+
+        .crm-tag-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            background: rgba(251, 191, 36, 0.12);
+            border: 1px solid rgba(251, 191, 36, 0.35);
+            color: #fde047;
+            padding: 1px 7px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+            font-family: var(--font-mono, monospace);
+        }
+        .crm-tag-pill .tag-del-btn {
+            cursor: pointer;
+            color: #fca5a5;
+            font-weight: bold;
+            margin-left: 2px;
+            font-size: 11px;
+            line-height: 1;
+        }
+        .crm-tag-pill .tag-del-btn:hover {
+            color: #ef4444;
+        }
+
+        .crm-notes-badge {
+            display: inline-flex;
+            align-items: center;
+            cursor: pointer;
+            font-size: 12px;
+            color: #94a3b8;
+            transition: color 0.15s ease;
+        }
+        .crm-notes-badge:hover {
+            color: #38bdf8;
+        }
+
+        .crm-card {
+            background: var(--bg-subtle);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+        .crm-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-subtle);
+            padding-bottom: 10px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .crm-vip-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-size: 12.5px;
+            font-weight: 700;
+            cursor: pointer;
+            border: 1px solid var(--border-color);
+            background: var(--bg-surface);
+            color: var(--text-muted);
+            transition: all 0.2s ease;
+        }
+        .crm-vip-toggle:hover {
+            border-color: #fbbf24;
+            color: var(--text-main);
+        }
+        .crm-vip-toggle.active {
+            background: rgba(245, 158, 11, 0.15);
+            border-color: #f59e0b;
+            color: #fbbf24;
+            box-shadow: 0 0 12px rgba(245, 158, 11, 0.25);
+        }
+        .crm-quick-tag {
+            background: var(--bg-surface);
+            border: 1px dashed var(--border-color);
+            color: var(--text-muted);
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            user-select: none;
+        }
+        .crm-quick-tag:hover {
+            border-color: #fbbf24;
+            color: #fde047;
+            background: rgba(251, 191, 36, 0.08);
+            transform: translateY(-1px);
+        }
+        .crm-notes-textarea {
+            width: 100%;
+            min-height: 80px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 10px;
+            color: var(--text-main);
+            font-family: inherit;
+            font-size: 12.5px;
+            line-height: 1.4;
+            resize: vertical;
+            transition: border-color 0.15s ease;
+            box-sizing: border-box;
+        }
+        .crm-notes-textarea:focus {
+            outline: none;
+            border-color: #fbbf24;
+            box-shadow: 0 0 8px rgba(251, 191, 36, 0.2);
+        }
+
+        /* Whale Ticker Bar */
+        .whale-ticker-bar {
+            background: linear-gradient(90deg, rgba(147, 51, 234, 0.15) 0%, rgba(30, 41, 59, 0.85) 100%);
+            border: 1px solid rgba(168, 85, 247, 0.4);
+            border-radius: var(--radius-md, 6px);
+            padding: 8px 14px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 16px;
+            box-shadow: 0 4px 14px rgba(147, 51, 234, 0.15);
+            overflow: hidden;
+        }
+        .whale-ticker-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            font-weight: 800;
+            color: #d8b4fe;
+            white-space: nowrap;
+            text-transform: uppercase;
+        }
+        .ticker-pulse {
+            width: 8px;
+            height: 8px;
+            background: #a855f7;
+            border-radius: 50%;
+            box-shadow: 0 0 10px #c084fc;
+            animation: pulse-glow 1.5s infinite;
+        }
+        @keyframes pulse-glow {
+            0% { transform: scale(0.9); opacity: 0.6; }
+            50% { transform: scale(1.3); opacity: 1; box-shadow: 0 0 14px #e9d5ff; }
+            100% { transform: scale(0.9); opacity: 0.6; }
+        }
+        .whale-ticker-content {
+            flex: 1;
+            overflow-x: auto;
+            white-space: nowrap;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            scrollbar-width: none;
+        }
+        .whale-ticker-content::-webkit-scrollbar {
+            display: none;
+        }
+        .whale-ticker-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-color);
+            padding: 3px 9px;
+            border-radius: 20px;
+            font-size: 11.5px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            white-space: nowrap;
+        }
+        .whale-ticker-chip:hover {
+            border-color: #a855f7;
+            transform: translateY(-1px);
+        }
+        .whale-ticker-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+        }
+
+        /* Whale Toast Container */
+        .whale-toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+            max-width: 380px;
+            width: calc(100% - 40px);
+        }
+        .whale-toast {
+            pointer-events: auto;
+            background: rgba(15, 23, 42, 0.95);
+            border: 1px solid #a855f7;
+            border-left: 4px solid #c084fc;
+            border-radius: 8px;
+            padding: 12px 14px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 0 20px rgba(168, 85, 247, 0.35);
+            backdrop-filter: blur(8px);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            animation: toast-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            transition: all 0.25s ease;
+            cursor: pointer;
+        }
+        .whale-toast:hover {
+            transform: translateY(-2px);
+            border-color: #e9d5ff;
+        }
+        @keyframes toast-in {
+            from { transform: translateX(110%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes toast-out {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(110%); opacity: 0; }
+        }
+
+        /* Loyalty Hub Styling */
+        .hub-nav-btn {
+            background: none;
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-size: 12.5px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .hub-nav-btn.active {
+            background: var(--bg-surface);
+            border-color: #a855f7;
+            color: #d8b4fe;
+            box-shadow: 0 0 10px rgba(168, 85, 247, 0.2);
+        }
+        .loyalty-progress-wrap {
+            width: 100%;
+            height: 8px;
+            background: var(--bg-surface);
+            border-radius: 4px;
+            overflow: hidden;
+            border: 1px solid var(--border-subtle);
+            margin: 6px 0;
+        }
+        .loyalty-progress-bar {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.4s ease;
+        }
+        .tag-shifter {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.5);
+            color: #fca5a5;
+            padding: 2px 7px;
+            border-radius: 4px;
+            font-size: 10.5px;
+            font-weight: 800;
+            font-family: var(--font-mono, monospace);
+        }
+    </style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="app-header">
+    <div class="header-inner">
+        <a href="/admin" class="brand-block">
+            <img src="/pictures/bot_avatar.jpg" alt="toktracker" class="brand-logo" />
+            <div class="brand-text">
+                <div class="brand-title-row">
+                    <h1 class="brand-title">toktracker</h1>
+                    <span class="brand-mode-tag" style="background: linear-gradient(135deg, #9333ea 0%, #3b82f6 100%); color:#fff;">SPENDER-RADAR &amp; CHATLOGS</span>
+                </div>
+                <span class="brand-subtitle">WHALE DETECTION · CROSS-STREAMER RECON · CHAT INTELLIGENCE</span>
+            </div>
+        </a>
+        <div class="status-strip">
+            <span class="pill">Admin: <strong>{{ admin_sub or "TELEGRAM" }}</strong></span>
+            <span class="pill">TikTokLive: <strong>{{ "AKTIV" if tiktoklive_available else "INAKTIV" }}</strong></span>
+            <span class="pill">Telegram-Bot: <strong>{{ telegram_diag.state | upper }}</strong></span>
+            <a class="btn-link sm" href="/admin">← Admin-Dashboard</a>
+            <a class="btn-link sm" href="/site-analytics">📊 Web-Analysen</a>
+            <a class="btn-link primary sm" href="/">Öffentliches Panel →</a>
+            <a class="btn-link sm" href="/logout">Abmelden</a>
+        </div>
+    </div>
+</header>
+
+<!-- Controls & Period Navigation -->
+<nav class="nav-bar">
+    <div class="nav-inner" style="justify-content: space-between;">
+        <div class="tab-list">
+            <button type="button" class="tab-btn active" data-period="all">Gesamt (All-Time)</button>
+            <button type="button" class="tab-btn" data-period="30d">30 Tage</button>
+            <button type="button" class="tab-btn" data-period="7d">7 Tage</button>
+            <button type="button" class="tab-btn" data-period="24h">24 Stunden</button>
+            <button type="button" class="tab-btn" data-period="today">Heute</button>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 14px;">
+            <div style="display: flex; align-items: center; gap: 6px;">
+                <label for="filterStreamer" class="mono muted" style="font-size: 11.5px;">Streamer:</label>
+                <select id="filterStreamer" style="padding: 4px 8px; font-size: 12px; background: var(--bg-subtle); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 4px;">
+                    <option value="">Alle Streamer</option>
+                </select>
+            </div>
+
+            <label style="font-size: 11.5px; color: var(--text-muted); display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
+                <input type="checkbox" id="chkAutoRefresh" checked style="accent-color: #a855f7;" />
+                <span>Live-Sync (3s)</span>
+            </label>
+        </div>
+    </div>
+</nav>
+
+<!-- Main Container -->
+<main class="page-container" style="max-width: 1440px; margin: 0 auto; padding: 20px 16px;">
+
+    <!-- Pop-in Whale Alert Toasts Container -->
+    <div id="whaleToastContainer" class="whale-toast-container"></div>
+
+    <!-- Live Whale-Alert Ticker Bar -->
+    <div class="whale-ticker-bar">
+        <div class="whale-ticker-label">
+            <span class="ticker-pulse"></span>
+            <span>WHALE-TICKER</span>
+        </div>
+        <div class="whale-ticker-content" id="whaleTickerTrack">
+            <span class="mono muted" style="font-size: 11.5px; padding: 0 10px;">Lade Live-Großspenden (&ge; <span id="tickerMinCoinsLabel">1.000</span> Coins)...</span>
+        </div>
+        <div class="whale-ticker-controls">
+            <select id="selWhaleThreshold" style="padding: 3px 6px; font-size: 11px; background: var(--bg-surface); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 4px;">
+                <option value="500">&ge; 500 Coins</option>
+                <option value="1000" selected>&ge; 1.000 Coins</option>
+                <option value="2500">&ge; 2.500 Coins (Shark)</option>
+                <option value="10000">&ge; 10.000 Coins (Whale)</option>
+            </select>
+            <button type="button" id="btnToggleWhaleSound" class="btn-link sm" style="padding: 2px 8px; font-size: 11px;">
+                🔊 Sound AN
+            </button>
+        </div>
+    </div>
+
+    <!-- KPI Summary Row -->
+    <div class="radar-hero">
+        <!-- Whales Card -->
+        <div class="radar-kpi-card" style="border-left: 3px solid #a855f7;">
+            <div>
+                <div class="radar-kpi-header">
+                    <span>🐋 Whales (&gt;= 10.000 Coins)</span>
+                    <span class="mono" style="color: #d8b4fe;">~50€+ Netto</span>
+                </div>
+                <div class="radar-kpi-val" id="kpiWhalesCount">-</div>
+            </div>
+            <div class="radar-kpi-sub">
+                <span>Top Spender-Segment</span>
+            </div>
+        </div>
+
+        <!-- Sharks Card -->
+        <div class="radar-kpi-card" style="border-left: 3px solid #38bdf8;">
+            <div>
+                <div class="radar-kpi-header">
+                    <span>🦈 Sharks (&gt;= 2.500 Coins)</span>
+                    <span class="mono" style="color: #7dd3fc;">~12.50€+ Netto</span>
+                </div>
+                <div class="radar-kpi-val" id="kpiSharksCount">-</div>
+            </div>
+            <div class="radar-kpi-sub">
+                <span>Mittlere Großspender</span>
+            </div>
+        </div>
+
+        <!-- Dolphins Card -->
+        <div class="radar-kpi-card" style="border-left: 3px solid #34d399;">
+            <div>
+                <div class="radar-kpi-header">
+                    <span>🐬 Dolphins (&gt;= 500 Coins)</span>
+                    <span class="mono" style="color: #6ee7b7;">~2.50€+ Netto</span>
+                </div>
+                <div class="radar-kpi-val" id="kpiDolphinsCount">-</div>
+            </div>
+            <div class="radar-kpi-sub">
+                <span>Aktive Supporter</span>
+            </div>
+        </div>
+
+        <!-- Cross-Streamer Whales Card -->
+        <div class="radar-kpi-card" style="border-left: 3px solid #f59e0b;">
+            <div>
+                <div class="radar-kpi-header">
+                    <span>⚡ Cross-Streamer Spender</span>
+                    <span class="mono" style="color: #fbbf24;">&ge; 2 Kanäle</span>
+                </div>
+                <div class="radar-kpi-val" id="kpiCrossCount">-</div>
+            </div>
+            <div class="radar-kpi-sub">
+                <span>Netzwerkweite Spender</span>
+            </div>
+        </div>
+
+        <!-- VIP Watchlist Card -->
+        <div class="radar-kpi-card" style="border-left: 3px solid #eab308; cursor: pointer;" id="cardKpiVip" title="Klicken, um VIP-Filter umzuschalten">
+            <div>
+                <div class="radar-kpi-header">
+                    <span>⭐ VIP-Watchlist</span>
+                    <span class="mono" style="color: #fde047;">Fokus</span>
+                </div>
+                <div class="radar-kpi-val" id="kpiVipCount" style="color: #fbbf24;">-</div>
+            </div>
+            <div class="radar-kpi-sub">
+                <span>Beobachtete Großspender</span>
+            </div>
+        </div>
+
+        <!-- Chatlogs Recorded Card -->
+        <div class="radar-kpi-card" style="border-left: 3px solid #ec4899;">
+            <div>
+                <div class="radar-kpi-header">
+                    <span>💬 Erfasste Chatlogs</span>
+                    <span class="mono" style="color: #f472b6;">7 Tage Retention</span>
+                </div>
+                <div class="radar-kpi-val" id="kpiChatCount">-</div>
+            </div>
+            <div class="radar-kpi-sub">
+                <span>Rolling Archivierung</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- View Mode Switcher -->
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
+        <div style="display: flex; gap: 8px;">
+            <button type="button" class="hub-nav-btn active" id="btnTabLeaderboard">
+                🐋 Spender-Leaderboard &amp; Chat
+            </button>
+            <button type="button" class="hub-nav-btn" id="btnTabLoyaltyHub">
+                🔀 Loyalitäts- &amp; Frontenwechsler-Hub
+            </button>
+        </div>
+        <div id="loyaltyHubControls" style="display: none; align-items: center; gap: 10px;">
+            <span class="mono muted" style="font-size: 11.5px;">Zeitraum für Loyalitäts-Wechsel:</span>
+            <select id="selLoyaltyDays" style="padding: 4px 8px; font-size: 11.5px; background: var(--bg-subtle); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 4px;">
+                <option value="1">Letzte 24 Stunden</option>
+                <option value="3">Letzte 3 Tage</option>
+                <option value="7">Letzte 7 Tage</option>
+                <option value="14" selected>Letzte 14 Tage</option>
+                <option value="30">Letzte 30 Tage</option>
+            </select>
+            <button type="button" id="btnRefreshLoyaltyHub" class="btn-link sm" style="padding: 3px 8px; font-size: 11px;">
+                ↻ Neu berechnen
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Split Layout (Leaderboard & Chat) -->
+    <div id="radarSplitLayout" class="radar-split-container">
+
+        <!-- Column 1: Spender-Radar Leaderboard -->
+        <div class="box" style="margin-bottom: 0; display: flex; flex-direction: column;">
+            <div class="box-header" style="flex-wrap: wrap; gap: 10px;">
+                <div>
+                    <h2>🐋 Spender-Radar &amp; Whale-Rangliste</h2>
+                    <div class="section-hint">Identifiziert und profiliert Spender über alle überwachten Kanäle</div>
+                </div>
+
+                <!-- Sub-Filters for Donors -->
+                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                    <div style="position: relative;">
+                        <input type="text" id="donorSearchInput" placeholder="Spender suchen..." style="padding: 5px 10px; font-size: 12px; background: var(--bg-subtle); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 4px; width: 140px;" />
+                    </div>
+
+                    <select id="donorTierFilter" style="padding: 5px 8px; font-size: 12px; background: var(--bg-subtle); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 4px;">
+                        <option value="">Alle Tiers (&ge; 500)</option>
+                        <option value="whale">🐋 Nur Whales (&ge; 10k)</option>
+                        <option value="shark">🦈 Sharks+ (&ge; 2.5k)</option>
+                        <option value="dolphin">🐬 Dolphins+ (&ge; 500)</option>
+                    </select>
+
+                    <label style="font-size: 11.5px; color: var(--text-muted); display: inline-flex; align-items: center; gap: 4px; cursor: pointer;">
+                        <input type="checkbox" id="chkCrossOnly" style="accent-color: #f59e0b;" />
+                        <span>⚡ Cross-Streamer</span>
+                    </label>
+
+                    <label style="font-size: 11.5px; color: #fbbf24; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; font-weight: 700;">
+                        <input type="checkbox" id="chkVipOnly" style="accent-color: #eab308;" />
+                        <span>⭐ VIP-Watchlist</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Donor Table -->
+            <div class="table-wrap" style="flex: 1; max-height: 600px; overflow-y: auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 40px;">#</th>
+                            <th class="hide-sm">Tier</th>
+                            <th>Spender</th>
+                            <th class="num-col">Coins</th>
+                            <th class="num-col">Netto (EUR)</th>
+                            <th class="num-col hide-sm">Netto (USD)</th>
+                            <th class="num-col hide-md">Kanäle</th>
+                            <th class="hide-sm">Zuletzt gesehen</th>
+                            <th style="text-align: right;">Aktion</th>
+                        </tr>
+                    </thead>
+                    <tbody id="donorTableBody">
+                        <tr><td colspan="9" style="text-align: center; color: var(--text-muted); padding: 30px;">Lade Spender-Radar...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Column 2: Live Streamer Chatlog Übersicht -->
+        <div class="chatlog-box">
+            <div class="chatlog-header">
+                <div>
+                    <h2 style="font-size: 15px; margin: 0; display: flex; align-items: center; gap: 8px;">
+                        <span>💬 Live Streamer-Chat</span>
+                        <span id="chatLiveBadge" class="tag-live mono" style="font-size: 10px; padding: 2px 6px;">LIVE</span>
+                    </h2>
+                    <span class="mono muted" id="chatMetaCount" style="font-size: 11px;">0 Nachrichten</span>
+                </div>
+
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <label style="font-size: 11px; color: var(--text-muted); display: inline-flex; align-items: center; gap: 4px; cursor: pointer;">
+                        <input type="checkbox" id="chkWhaleOnlyChat" style="accent-color: #a855f7;" />
+                        <span>Nur Spender</span>
+                    </label>
+
+                    <input type="text" id="chatSearchInput" placeholder="Chat filtern..." style="padding: 4px 8px; font-size: 11px; width: 110px; background: var(--bg-subtle); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 4px;" />
+
+                    <button type="button" id="btnToggleChatPause" class="btn-link sm" style="padding: 3px 8px; font-size: 11px;">
+                        ⏸ Pause
+                    </button>
+                </div>
+            </div>
+
+            <!-- Messages Area -->
+            <div class="chatlog-messages-area" id="chatMessagesArea">
+                <div style="text-align: center; color: var(--text-muted); padding: 40px;">
+                    Lade Chatnachrichten...
+                </div>
+            </div>
+
+            <!-- Bottom chat controls -->
+            <div style="padding: 8px 14px; background: var(--bg-subtle); border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--text-muted);">
+                <span>Automatisches Scrollen ist aktiv</span>
+                <button type="button" id="btnScrollBottom" class="btn-link sm" style="font-size: 11px; padding: 2px 8px;">
+                    ↓ Nach unten
+                </button>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Loyalty & Frontenwechsler Hub Layout -->
+    <div id="loyaltyHubLayout" style="display: none; flex-direction: column; gap: 20px;">
+
+        <!-- Section 1: Frontenwechsler & Spender-Migrationen -->
+        <div class="box" style="margin-bottom: 0;">
+            <div class="box-header" style="flex-wrap: wrap; gap: 10px;">
+                <div>
+                    <h2 style="display: flex; align-items: center; gap: 8px;">
+                        <span>🔀 Frontenwechsler &amp; Spender-Migrationen</span>
+                        <span id="frontenwechslerBadge" class="tag-shifter" style="font-size: 11px;">0 Erkannt</span>
+                    </h2>
+                    <div class="section-hint">Großspender, deren Spendenfokus sich vom früheren Haupt-Streamer zu einem neuen Kanal verlagert hat.</div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span class="mono muted" style="font-size: 11px;">Mindestspenden: &ge; 50 Coins</span>
+                </div>
+            </div>
+
+            <div style="overflow-x: auto;">
+                <table class="data-table" id="frontenwechslerTable">
+                    <thead>
+                        <tr>
+                            <th>Spender</th>
+                            <th>Status &amp; VIP</th>
+                            <th>Früherer Haupt-Kanal</th>
+                            <th>Neuer Fokus-Kanal</th>
+                            <th style="text-align: right;">Früher (Coins)</th>
+                            <th style="text-align: right;">Kürzlich (Coins)</th>
+                            <th>Loyalitäts-Score</th>
+                            <th style="text-align: center;">Aktion</th>
+                        </tr>
+                    </thead>
+                    <tbody id="frontenwechslerTableBody">
+                        <tr>
+                            <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 30px;">
+                                Keine Frontenwechsler im gewählten Zeitraum erkannt.
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Section 2: Streamer-Überschneidungs-Matrix (Shared Whales) -->
+        <div class="box" style="margin-bottom: 0;">
+            <div class="box-header" style="flex-wrap: wrap; gap: 10px;">
+                <div>
+                    <h2 style="display: flex; align-items: center; gap: 8px;">
+                        <span>⚡ Streamer-Überschneidungs-Matrix</span>
+                        <span id="overlapPairsBadge" class="mono muted" style="font-size: 11px; background: var(--bg-subtle); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border-subtle);">0 Kanal-Paare</span>
+                    </h2>
+                    <div class="section-hint">Überwachte Streamer, die sich signifikante Spender und Coins teilen (Netzwerk-Synergien oder Spender-Wettstreit).</div>
+                </div>
+            </div>
+
+            <div style="overflow-x: auto;">
+                <table class="data-table" id="overlapMatrixTable">
+                    <thead>
+                        <tr>
+                            <th>Streamer-Paar</th>
+                            <th style="text-align: right;">Gemeinsame Spender</th>
+                            <th style="text-align: right;">Gesamt-Münzen (Paar)</th>
+                            <th style="text-align: right;">Volumen Kanal A</th>
+                            <th style="text-align: right;">Volumen Kanal B</th>
+                            <th style="min-width: 140px;">Verteilung (Split)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="overlapMatrixBody">
+                        <tr>
+                            <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 30px;">
+                                Lade Überschneidungs-Matrix...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+
+</main>
+
+<!-- Donor Dossier Modal -->
+<div class="modal-overlay" id="donorModalOverlay">
+    <div class="modal-content-box">
+        <div class="modal-header">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <h2 style="margin: 0; font-size: 16px;">Spender-Dossier</h2>
+                <span id="modalDonorTierBadge"></span>
+                <span id="modalCrossBadge"></span>
+            </div>
+            <button type="button" class="btn-link sm" id="btnCloseDonorModal" style="font-size: 16px; cursor: pointer;">✕</button>
+        </div>
+
+        <div class="modal-body" id="donorModalBody">
+            <div style="text-align: center; color: var(--text-muted); padding: 40px;">Lade Spender-Dossier...</div>
+        </div>
+    </div>
+</div>
+
+<!-- Footer -->
+<footer class="app-footer">
+    <div class="footer-inner">
+        <div>
+            <span>toktracker v2.5.2 &copy; 2026</span>
+            <span class="sep">·</span>
+            <span>Spender-Radar &amp; Chatlog Intelligence</span>
+        </div>
+        <div>
+            <a href="/admin">Admin-Dashboard</a>
+            <span class="sep">·</span>
+            <a href="/site-analytics">Website &amp; Bot Analysen</a>
+            <span class="sep">·</span>
+            <a href="/">Öffentliche Ansicht</a>
+        </div>
+    </div>
+</footer>
+
+<script src="/static/donor_radar.js?v=2.5.4"></script>
+</body>
+</html>
